@@ -1,0 +1,7 @@
+lib/
+lib64/
+lib64
+bin/
+*.pyc
+app/__pycache__/
+log/app.log

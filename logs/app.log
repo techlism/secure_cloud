@@ -1,0 +1,37 @@
+2024-11-07 17:26:07,098 - secure_storage_service - ERROR - Upload failed: 'SecureStorageService' object has no attribute '_get_mime_type'
+2024-11-07 17:34:10,163 - secure_storage_service - ERROR - Upload failed: no such table: blocks
+2024-11-07 17:34:29,678 - secure_storage_service - ERROR - Upload failed: no such table: blocks
+2024-11-07 17:35:36,799 - secure_storage_service - ERROR - Upload failed: no such table: blocks
+2024-11-07 17:35:57,047 - secure_storage_service - ERROR - Upload failed: no such table: blocks
+2024-11-07 17:43:48,783 - secure_storage_service - ERROR - Upload failed: no such table: blocks
+2024-11-07 18:37:47,952 - secure_storage_service - ERROR - Upload failed: 
+**********************************************************************
+  Resource [93mpunkt_tab[0m not found.
+  Please use the NLTK Downloader to obtain the resource:
+
+  [31m>>> import nltk
+  >>> nltk.download('punkt_tab')
+  [0m
+  For more information see: https://www.nltk.org/data.html
+
+  Attempted to load [93mtokenizers/punkt_tab/english/[0m
+
+  Searched in:
+    - '/home/techlism/nltk_data'
+    - '/home/techlism/projects/secure_cloud/nltk_data'
+    - '/home/techlism/projects/secure_cloud/share/nltk_data'
+    - '/home/techlism/projects/secure_cloud/lib/nltk_data'
+    - '/usr/share/nltk_data'
+    - '/usr/local/share/nltk_data'
+    - '/usr/lib/nltk_data'
+    - '/usr/local/lib/nltk_data'
+**********************************************************************
+
+2024-11-07 18:38:30,294 - secure_storage_service - ERROR - Upload failed: DatabaseManager.add_tags() got an unexpected keyword argument 'block_id'
+2024-11-07 19:12:14,298 - secure_storage_service - ERROR - Upload failed: max_df corresponds to < documents than min_df
+2024-11-07 19:15:35,931 - secure_storage_service - ERROR - Upload failed: max_df corresponds to < documents than min_df
+2024-11-07 19:16:18,371 - secure_storage_service - ERROR - Upload failed: too many values to unpack (expected 2)
+2024-11-07 20:18:12,543 - secure_storage_service - ERROR - Upload failed: 'SecureStorageService' object has no attribute '_get_file_url'
+2024-11-07 20:20:25,749 - secure_storage_service - ERROR - Upload failed: 'DatabaseManager' object has no attribute 'add_file'
+2024-11-08 04:51:27,464 - secure_storage_service - ERROR - Upload failed: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:iam::529088260474:user/techlism is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::secure-cloud-project/b59587ec-0ba0-4f12-8548-75aaff5bbe6f/0" with an explicit deny in a resource-based policy
+2024-11-08 05:20:43,104 - secure_storage_service - ERROR - Upload failed: An error occurred (AccessDenied) when calling the PutObject operation: User: arn:aws:iam::529088260474:user/techlism is not authorized to perform: s3:PutObject on resource: "arn:aws:s3:::secure-cloud-project/5b198749-329e-49e9-a10d-9524f0a8c5b8/0" with an explicit deny in a resource-based policy
