@@ -40,14 +40,14 @@ async def read_root():
             
             <form action="/search" method="get">
                 <h2>Search</h2>
-                <input type="text" name="query" placeholder="Enter search term">
+                <input type="text" name="keyword" placeholder="Enter search term">
                 <button type="submit">Search</button>
             </form>
         </div>
     </body>
     </html>
     """
-
+    
 @app.post("/upload/")
 async def upload_file(
     file: UploadFile,
@@ -104,13 +104,13 @@ async def download_file(file_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=404, detail=str(e))
     
 @app.get("/search/")
-async def search_content(keyword: str, min_score: float = 0.1):
+async def search_content(query: str, min_score: float = 0.1):
     try:
-        results = storage.search_by_keyword(keyword, min_score)
+        results = storage.search_by_keyword(query, min_score)
         return JSONResponse(
             status_code=200,
             content={"results": results}
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))    
+        raise HTTPException(status_code=500, detail=str(e))  
     

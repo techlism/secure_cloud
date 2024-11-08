@@ -214,8 +214,8 @@ def __main__():
     print(f"Database exists: {db_path.exists()}")
     db = DatabaseManager(db_path)
     # db.clear_database()
-    db.__init__(db_path)
-    # print(db.see_all_files())
+    # db.__init__(db_path)
+    print(db.see_all_files())
 
 if __name__ == '__main__':
     __main__()
