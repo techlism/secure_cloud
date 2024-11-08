@@ -113,3 +113,4 @@ async def search_content(keyword: str, min_score: float = 0.1):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))    
+    

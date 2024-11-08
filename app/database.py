@@ -206,7 +206,8 @@ class DatabaseManager:
                 result = dict(row)
                 result['metadata'] = json.loads(result['metadata'])
                 return result
-            return None        
+            return None      
+          
 def __main__():
     db_path = DATABASE_PATH
     print(f"Database path: {db_path}")
