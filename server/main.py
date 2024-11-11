@@ -4,7 +4,7 @@ import boto3
 import sqlite3
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 import config
 import json
 from datetime import datetime
@@ -115,6 +115,38 @@ async def get_file_blocks(file_id: str):
         }
     except Exception as e:
         logging.error(f"Error retrieving blocks for file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/verify-blocks")
+async def verify_blocks(block_ids: List[str], file_id: str):
+    try:
+        blocks_content = []
+        auth_tags = []
+        
+        for block_id in block_ids:
+            # Get block from S3
+            s3_key = f"{file_id}/{block_id}"
+            response = s3_client.get_object(
+                Bucket=config.AWS_CONFIG['bucket_name'],
+                Key=s3_key
+            )
+            blocks_content.append(response['Body'].read())
+            auth_tags.append(response['Metadata']['auth_tag'])
+        
+        # Merge blocks if multiple
+        if len(blocks_content) > 1:
+            merged_content = b''.join(blocks_content)
+            merged_auth = ''.join(auth_tags)
+        else:
+            merged_content = blocks_content[0]
+            merged_auth = auth_tags[0]
+            
+        return {
+            "content": merged_content.hex(),
+            "auth_tag": merged_auth
+        }
+        
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     
 @app.get("/")

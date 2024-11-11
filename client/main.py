@@ -90,7 +90,31 @@ class SecureFileUploader:
                     raise Exception(f"Upload failed: {str(e)}")
 
         return file_id
-
+    
+    def verify_blocks(self, file_id: str, block_ids: List[str]) -> bool:
+        """Verify specific blocks"""
+        try:
+            response = requests.post(
+                f"{self.server_url}/verify-blocks",
+                json={"block_ids": block_ids, "file_id": file_id}
+            )
+            
+            if response.status_code != 200:
+                raise Exception(f"Server error: {response.text}")
+                
+            data = response.json()
+            content = bytes.fromhex(data['content'])
+            received_auth = data['auth_tag']
+            
+            # Generate our own auth tag
+            local_auth, _ = self.generate_auth_tag(content)
+            
+            # Compare tags
+            return local_auth == received_auth
+            
+        except Exception as e:
+            print(f"Verification failed: {str(e)}")
+            return False
     # def verify_uploads(self, file_id: str) -> bool:
     #     """Verify all blocks were uploaded"""
     #     response = requests.get(f"{self.server_url}/blocks/{file_id}")
@@ -109,9 +133,17 @@ if __name__ == "__main__":
         file_id = uploader.upload_file(file_path)
         print(f"File uploaded successfully with ID: {file_id}")
         
-        # if uploader.verify_uploads(file_id):
-        #     print("All blocks verified")
-        # else:
-        #     print("Block verification failed")
+        # Get blocks for the file
+        response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
+        blocks = response.json()['blocks']
+        
+        # Verify first two blocks if available
+        block_ids = [block['block_id'] for block in blocks[:2]]
+        if block_ids:
+            if uploader.verify_blocks(file_id, block_ids):
+                print("Blocks verified successfully")
+            else:
+                print("Block verification failed")
+                
     except Exception as e:
-        print(f"Upload failed: {e}")
+        print(f"Operation failed: {e}")
