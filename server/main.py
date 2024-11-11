@@ -125,29 +125,24 @@ async def get_file_blocks(file_id: str):
 async def verify_blocks(request: VerifyBlocksRequest):
     try:
         blocks_content = []
-        auth_tags = []
+        auth_tags_with_iv = []
         
         for block_id in request.block_ids:
-            # Get block from S3
             s3_key = f"{request.file_id}/{block_id}"
             response = s3_client.get_object(
                 Bucket=config.AWS_CONFIG['bucket_name'],
                 Key=s3_key
             )
             blocks_content.append(response['Body'].read())
-            auth_tags.append(response['Metadata']['auth_tag'])
+            auth_tags_with_iv.append(response['Metadata']['auth_tag'])
         
         # Merge blocks if multiple
-        if len(blocks_content) > 1:
-            merged_content = b''.join(blocks_content)
-            merged_auth = ''.join(auth_tags)
-        else:
-            merged_content = blocks_content[0]
-            merged_auth = auth_tags[0]
+        merged_content = b''.join(blocks_content)
+        merged_auth = auth_tags_with_iv[0] if len(blocks_content) == 1 else ''.join(auth_tags_with_iv)
             
         return {
             "content": merged_content.hex(),
-            "auth_tag": merged_auth
+            "auth_tag": merged_auth  # This includes IV + tag
         }
         
     except Exception as e:

@@ -1,6 +1,6 @@
 # client.py
 from pathlib import Path
-from typing import Generator
+from typing import Generator, List
 import hashlib
 from Crypto.Cipher import AES
 from Crypto.Random import get_random_bytes
@@ -106,23 +106,23 @@ class SecureFileUploader:
             content = bytes.fromhex(data['content'])
             received_auth = data['auth_tag']
             
-            # Generate our own auth tag
-            local_auth, _ = self.generate_auth_tag(content)
+            # Extract IV from received auth tag (first 32 hex chars = 16 bytes)
+            iv = bytes.fromhex(received_auth[:32])
             
-            # Compare tags
+            # Generate auth tag using same IV
+            cipher = AES.new(self.key, AES.MODE_CBC, iv)
+            padded_data = self._pad_data(content)
+            ciphertext = cipher.encrypt(padded_data)
+            local_auth = iv.hex() + ciphertext[-16:].hex()
+            
+            print(f"Local auth: {local_auth}")
+            print(f"Received : {received_auth}")
+            
             return local_auth == received_auth
-            
+                
         except Exception as e:
             print(f"Verification failed: {str(e)}")
             return False
-    # def verify_uploads(self, file_id: str) -> bool:
-    #     """Verify all blocks were uploaded"""
-    #     response = requests.get(f"{self.server_url}/blocks/{file_id}")
-    #     if response.status_code != 200:
-    #         return False
-        
-    #     blocks = response.json()['blocks']
-    #     return len(blocks) > 0
 
 # Usage example
 if __name__ == "__main__":
@@ -134,16 +134,16 @@ if __name__ == "__main__":
         print(f"File uploaded successfully with ID: {file_id}")
         
         # Get blocks for the file
-        response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
-        blocks = response.json()['blocks']
+        # response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
+        # blocks = response.json()['blocks']
         
-        # Verify first two blocks if available
-        block_ids = [block['block_id'] for block in blocks[:2]]
-        if block_ids:
-            if uploader.verify_blocks(file_id, block_ids):
-                print("Blocks verified successfully")
-            else:
-                print("Block verification failed")
+        # # Verify first two blocks if available
+        # block_ids = [block['block_id'] for block in blocks[:2]]
+        # if block_ids:
+        #     if uploader.verify_blocks(file_id, block_ids):
+        #         print("Blocks verified successfully")
+        #     else:
+        #         print("Block verification failed")
                 
     except Exception as e:
         print(f"Operation failed: {e}")
