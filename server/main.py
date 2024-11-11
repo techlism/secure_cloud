@@ -8,7 +8,7 @@ from typing import List, Optional
 import config
 import json
 from datetime import datetime
-
+from pydantic import BaseModel
 # Setup logging
 logging.basicConfig(
     filename=config.LOG_FILE,
@@ -21,6 +21,10 @@ app = FastAPI()
 
 # Initialize S3 client
 s3_client = boto3.client('s3', region_name=config.AWS_CONFIG['region_name'])
+
+class VerifyBlocksRequest(BaseModel):
+    block_ids: List[str]
+    file_id: str
 
 def init_db():
     """Initialize SQLite database"""
@@ -118,14 +122,14 @@ async def get_file_blocks(file_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/verify-blocks")
-async def verify_blocks(block_ids: List[str], file_id: str):
+async def verify_blocks(request: VerifyBlocksRequest):
     try:
         blocks_content = []
         auth_tags = []
         
-        for block_id in block_ids:
+        for block_id in request.block_ids:
             # Get block from S3
-            s3_key = f"{file_id}/{block_id}"
+            s3_key = f"{request.file_id}/{block_id}"
             response = s3_client.get_object(
                 Bucket=config.AWS_CONFIG['bucket_name'],
                 Key=s3_key
@@ -152,3 +156,4 @@ async def verify_blocks(block_ids: List[str], file_id: str):
 @app.get("/")
 async def root():
     return {"message": "Welcome to the Secure File Server!"}
+
