@@ -103,26 +103,33 @@ class SecureFileUploader:
                 raise Exception(f"Server error: {response.text}")
                 
             data = response.json()
-            content = bytes.fromhex(data['content'])
-            received_auth = data['auth_tag']
+            contents = [bytes.fromhex(content) for content in data['contents']]
+            received_auth_tags = data['auth_tags']
             
-            # Extract IV from received auth tag (first 32 hex chars = 16 bytes)
-            iv = bytes.fromhex(received_auth[:32])
-            
-            # Generate auth tag using same IV
-            cipher = AES.new(self.key, AES.MODE_CBC, iv)
-            padded_data = self._pad_data(content)
-            ciphertext = cipher.encrypt(padded_data)
-            local_auth = iv.hex() + ciphertext[-16:].hex()
-            
-            print(f"Local auth: {local_auth}")
-            print(f"Received : {received_auth}")
-            
-            return local_auth == received_auth
+            for content, received_auth in zip(contents, received_auth_tags):
+                # Extract IV from received auth tag (first 32 hex chars = 16 bytes)
+                iv = bytes.fromhex(received_auth[:32])
+                expected_auth = received_auth[32:]
+                
+                # Generate auth tag using the same IV
+                cipher = AES.new(self.key, AES.MODE_CBC, iv)
+                padded_data = self._pad_data(content)
+                ciphertext = cipher.encrypt(padded_data)
+                local_auth = ciphertext[-16:].hex()
+                
+                # Combine IV and local_auth to match the format
+                local_auth_combined = iv.hex() + local_auth
+                
+                if local_auth_combined != received_auth:
+                    print(f"Verification failed for block with auth tag: {received_auth}")
+                    return False
+                
+            return True
                 
         except Exception as e:
             print(f"Verification failed: {str(e)}")
             return False
+
 
 # Usage example
 if __name__ == "__main__":
@@ -134,16 +141,16 @@ if __name__ == "__main__":
         print(f"File uploaded successfully with ID: {file_id}")
         
         # Get blocks for the file
-        # response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
-        # blocks = response.json()['blocks']
+        response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
+        blocks = response.json()['blocks']
         
-        # # Verify first two blocks if available
-        # block_ids = [block['block_id'] for block in blocks[:2]]
-        # if block_ids:
-        #     if uploader.verify_blocks(file_id, block_ids):
-        #         print("Blocks verified successfully")
-        #     else:
-        #         print("Block verification failed")
+        # Verify first two blocks if available
+        block_ids = [block['block_id'] for block in blocks[:2]]
+        if block_ids:
+            if uploader.verify_blocks(file_id, block_ids):
+                print("Blocks verified successfully")
+            else:
+                print("Block verification failed")
                 
     except Exception as e:
         print(f"Operation failed: {e}")

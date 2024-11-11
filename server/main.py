@@ -136,17 +136,15 @@ async def verify_blocks(request: VerifyBlocksRequest):
             blocks_content.append(response['Body'].read())
             auth_tags_with_iv.append(response['Metadata']['auth_tag'])
         
-        # Merge blocks if multiple
-        merged_content = b''.join(blocks_content)
-        merged_auth = auth_tags_with_iv[0] if len(blocks_content) == 1 else ''.join(auth_tags_with_iv)
-            
+        # No merging of content or auth_tags
         return {
-            "content": merged_content.hex(),
-            "auth_tag": merged_auth  # This includes IV + tag
+            "contents": [content.hex() for content in blocks_content],
+            "auth_tags": auth_tags_with_iv  # List of auth_tags
         }
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
     
 @app.get("/")
 async def root():
