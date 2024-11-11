@@ -116,3 +116,7 @@ async def get_file_blocks(file_id: str):
     except Exception as e:
         logging.error(f"Error retrieving blocks for file {file_id}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Secure File Server!"}
