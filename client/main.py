@@ -55,7 +55,6 @@ class SecureFileUploader:
         file_id = str(uuid.uuid4())
         file_size = os.path.getsize(file_path)
         total_blocks = math.ceil(file_size / self.block_size)
-
         uploaded_blocks = []
         
         with tqdm(total=total_blocks, desc="Uploading blocks") as pbar:
@@ -63,51 +62,56 @@ class SecureFileUploader:
                 block_id = self.generate_block_id(block, file_id)
                 auth_tag, _ = self.generate_auth_tag(block)
 
-                # Prepare file-like object for upload
                 files = {
-                    'file': (block_id, block, 'application/octet-stream')
+                    'file': ('block', block, 'application/octet-stream')
                 }
                 
-                # Upload block
-                response = requests.post(
-                    f"{self.server_url}/upload-block",
-                    files=files,
-                    data={
-                        'block_id': block_id,
-                        'file_id': file_id,
-                        'auth_tag': auth_tag
-                    }
-                )
-                
-                if response.status_code != 200:
-                    raise Exception(f"Failed to upload block: {response.text}")
-                
-                uploaded_blocks.append(response.json())
-                pbar.update(1)
+                data = {
+                    'block_id': block_id,
+                    'file_id': file_id,
+                    'auth_tag': auth_tag
+                }
+
+                try:
+                    # Send as multipart form data
+                    response = requests.post(
+                        f"{self.server_url}/upload-block",
+                        files=files,
+                        data=data  # This will be sent as form fields
+                    )
+                    
+                    if response.status_code != 200:
+                        raise Exception(f"Server error: {response.text}")
+                    
+                    uploaded_blocks.append(response.json())
+                    pbar.update(1)
+                    
+                except Exception as e:
+                    raise Exception(f"Upload failed: {str(e)}")
 
         return file_id
 
-    def verify_uploads(self, file_id: str) -> bool:
-        """Verify all blocks were uploaded"""
-        response = requests.get(f"{self.server_url}/blocks/{file_id}")
-        if response.status_code != 200:
-            return False
+    # def verify_uploads(self, file_id: str) -> bool:
+    #     """Verify all blocks were uploaded"""
+    #     response = requests.get(f"{self.server_url}/blocks/{file_id}")
+    #     if response.status_code != 200:
+    #         return False
         
-        blocks = response.json()['blocks']
-        return len(blocks) > 0
+    #     blocks = response.json()['blocks']
+    #     return len(blocks) > 0
 
 # Usage example
 if __name__ == "__main__":
-    uploader = SecureFileUploader("http://localhost:8000")
+    uploader = SecureFileUploader("http://15.206.89.160:8000")
     file_path = Path("example.txt")
     
     try:
         file_id = uploader.upload_file(file_path)
         print(f"File uploaded successfully with ID: {file_id}")
         
-        if uploader.verify_uploads(file_id):
-            print("All blocks verified")
-        else:
-            print("Block verification failed")
+        # if uploader.verify_uploads(file_id):
+        #     print("All blocks verified")
+        # else:
+        #     print("Block verification failed")
     except Exception as e:
-        print(f"Upload failed: {str(e)}")
+        print(f"Upload failed: {e}")

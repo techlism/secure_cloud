@@ -1,5 +1,5 @@
 # main.py
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 import boto3
 import sqlite3
 import logging
@@ -44,10 +44,10 @@ init_db()
 
 @app.post("/upload-block")
 async def upload_block(
-    file: UploadFile,
-    block_id: str,
-    file_id: str,
-    auth_tag: str
+    file: UploadFile = File(...),
+    block_id: str = Form(...),  # Add Form import
+    file_id: str = Form(...),
+    auth_tag: str = Form(...)
 ):
     try:
         # Read block content
