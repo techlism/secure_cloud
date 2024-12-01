@@ -10,7 +10,7 @@ import json
 import hashlib
 from datetime import datetime
 from pydantic import BaseModel
-from server.database import add_block
+from database import add_block
 
 # Setup logging
 logging.basicConfig(
