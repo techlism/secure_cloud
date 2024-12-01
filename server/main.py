@@ -129,6 +129,7 @@ async def verify_blocks(request: VerifyBlocksRequest):
                 Bucket=config.AWS_CONFIG['bucket_name'],
                 Key=s3_key
             )
+            print(response)
             tags.append(response['Metadata']['tag'])
             block_hashes.append(response['Metadata']['block_hash'])
 
