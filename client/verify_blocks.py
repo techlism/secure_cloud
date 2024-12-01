@@ -1,15 +1,15 @@
 # verify_blocks.py - Complete file
 from pathlib import Path
 from typing import List
-from main import SecureFileUploader
+from main import SecureFileUploader  # Ensure SecureFileUploader is in client.py
 import sys
 
 def verify_specific_blocks():
     # Hardcoded values for testing
-    SERVER_URL = "http://15.206.89.160:8000"
-    FILE_ID = "97cb28f2-7066-4e2e-bbc4-0f2c7a388055"
+    SERVER_URL = "http://15.206.89.160:8000"  # Replace with your actual server URL
+    FILE_ID = "9fbdeee4-5121-40ce-8f46-149238aae518"  # Replace with your actual file ID
     BLOCK_IDS = [
-        "e1cca550de61814a"
+        "418de17ba13aebdd"  # Replace with actual block IDs you want to verify                
     ]
 
     try:
