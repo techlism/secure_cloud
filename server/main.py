@@ -60,6 +60,9 @@ async def upload_block(
     try:
         content = await file.read()
         s3_key = f"{file_id}/{block_id}"
+        
+        block_hash = hashlib.sha256(content).hexdigest()
+
 
         # Upload to S3 with metadata
         s3_client.put_object(
@@ -69,7 +72,8 @@ async def upload_block(
             Metadata={
                 'tag': tag,
                 'file_id': file_id,
-                'block_id': block_id
+                'block_id': block_id,
+                'block_hash': block_hash
             }
         )
 
@@ -123,7 +127,7 @@ async def verify_blocks(request: VerifyBlocksRequest):
                 'tag': response['Metadata']['tag'],
                 'block_hash': response['Metadata']['block_hash']
             })
-        
+        print(result)
         return {"blocks": result}
 
     except Exception as e:
