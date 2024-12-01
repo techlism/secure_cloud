@@ -116,6 +116,7 @@ async def get_file_blocks(file_id: str):
 # server/main.py - Update verify-blocks endpoint
 @app.post("/verify-blocks")
 async def verify_blocks(request: VerifyBlocksRequest):
+    print(request)
     try:
         tags = []
         block_hashes = []
