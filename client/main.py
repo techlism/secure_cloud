@@ -1,59 +1,54 @@
-from pathlib import Path
-from typing import Generator, List
 import hashlib
-from fastecdsa.curve import P256
-from fastecdsa.point import Point
-from fastecdsa.keys import gen_keypair
 import requests
 import uuid
 import os
-from tqdm import tqdm
 import math
+from pathlib import Path
+from typing import Generator, List
+from tqdm import tqdm
+
+# Use py_ecc for cryptographic operations
+from py_ecc.bn128 import G1, G2, pairing, multiply, add, eq
 
 class SecureFileUploader:
-    def __init__(self, server_url: str, block_size: int = 1024 * 1024):
+    def __init__(self, server_url: str, block_size: int = 1024 * 1024, key_seed: str = 'fa074028-1bb9-4d69-bdd5-b4f683e8a85a'):
+        # Generate deterministic key from seed
+        seed_hash = hashlib.sha256(key_seed.encode()).digest()
+        self.x = int.from_bytes(seed_hash, 'big') % G1.order()
+        
+        # Generator point and public key
+        self.P = G1.generator()
+        self.Ppub = multiply(self.P, self.x)
+        
         self.server_url = server_url
         self.block_size = block_size
-        self.private_key, self.P = gen_keypair(P256)
-        self.public_key = self.private_key * self.P  # Public key
 
-    def split_file(self, file_path: Path) -> Generator[bytes, None, None]:
-        """Split file into blocks."""
-        with open(file_path, 'rb') as f:
-            while True:
-                block = f.read(self.block_size)
-                if not block:
-                    break
-                yield block
+    def hash_to_point(self, data):
+        # Convert data to a hash and map to G1 point
+        hash_bytes = hashlib.sha256(data).digest()
+        return multiply(self.P, int.from_bytes(hash_bytes, 'big') % G1.order())
 
     def generate_block_tag(self, block_data: bytes) -> str:
-        """Generate a cryptographic tag for a block."""
-        # Ensure we get an integer hash
-        block_hash = int.from_bytes(hashlib.sha256(block_data).digest(), byteorder="big")
+        # ZSS-like signature generation
+        H_m = self.hash_to_point(block_data)
+        S = multiply(self.P, pow(int(H_m[0]) + self.x, -1, G1.order()))
         
-        # Convert values to integers and perform modular arithmetic
-        private_key_int = int(self.private_key) % P256.q
-        inverse = pow(block_hash + private_key_int, -1, P256.q)  # Modular multiplicative inverse
-        
-        # Generate tag point
-        tag = inverse * self.P  # Point multiplication
-        
-        # Convert coordinates to integers
-        return f"{int(tag.x)},{int(tag.y)}"
+        # Convert signature to string representation
+        return f"{S[0]},{S[1]}"
 
     def upload_file(self, file_path: Path) -> str:
-        """Upload file in blocks with cryptographic tags."""
         file_id = str(uuid.uuid4())
         file_size = os.path.getsize(file_path)
         total_blocks = math.ceil(file_size / self.block_size)
 
         with tqdm(total=total_blocks, desc="Uploading blocks") as pbar:
+            i = 0
             for block in self.split_file(file_path):
                 block_id = hashlib.sha256(block).hexdigest()
                 tag = self.generate_block_tag(block)
 
                 files = {'file': ('block', block, 'application/octet-stream')}
-                data = {'block_id': block_id, 'file_id': file_id, 'tag': tag}
+                data = {'block_id': i, 'file_id': file_id, 'tag': tag}
 
                 response = requests.post(
                     f"{self.server_url}/upload-block",
@@ -64,13 +59,20 @@ class SecureFileUploader:
                     raise Exception(f"Upload failed: {response.text}")
 
                 pbar.update(1)
+                i += 1
 
         return file_id
-    # client/main.py
+
+    def split_file(self, file_path: Path) -> Generator[bytes, None, None]:
+        with open(file_path, 'rb') as f:
+            while True:
+                block = f.read(self.block_size)
+                if not block:
+                    break
+                yield block
+
     def verify_blocks(self, file_id: str, block_ids: List[str]) -> bool:
-        """Verify block authenticity using stored tags."""
         try:
-            # Make verification request
             response = requests.post(
                 f"{self.server_url}/verify-blocks",
                 json={
@@ -86,28 +88,29 @@ class SecureFileUploader:
                 print(f"Server error: {response.text}")
                 return False
                 
-            data = response.json()
-            if "tags" not in data:
-                print("Invalid server response - missing tags")
+            data = response.json()['blocks'][0]
+            
+            # Reconstruct signature point
+            tags = data['tag'].split(",")
+            S = (int(tags[0]), int(tags[1]))
+            
+            # Convert block hash
+            block_hash = data['block_hash']
+            H_m = self.hash_to_point(bytes.fromhex(block_hash))
+            
+            # Verification equation
+            left = pairing(add(H_m, self.Ppub), S)
+            right = pairing(self.P, self.P)
+            
+            verification_result = eq(left, right)
+            
+            if not verification_result:
+                print(f"Verification failed for block {block_ids[0]}")
                 return False
 
-            # Verify each tag
-            for tag_str in data["tags"]:
-                try:
-                    # Parse tag point coordinates
-                    tag_x, tag_y = map(int, tag_str.split(","))
-                    tag_point = Point(tag_x, tag_y, curve=P256)
+            print("All blocks verified successfully.")
+            return True                
                     
-                    # Basic verification - check if point is on curve
-                    if not P256.is_point_on_curve((tag_point.x, tag_point.y)):
-                        print(f"Invalid point: ({tag_x}, {tag_y})")
-                        return False
-                        
-                except ValueError as e:
-                    print(f"Tag parsing error: {e}")
-                    return False
-                    
-            return True
         except Exception as e:
             print(f"Verification failed: {str(e)}")
             return False
@@ -119,8 +122,6 @@ if __name__ == "__main__":
     
     try:
         file_id = uploader.upload_file(file_path)
-        print(f"File uploaded successfully with ID: {file_id}\n Keep this ID safe for future reference.")
-        
-                
+        print(f"File uploaded successfully with ID: {file_id}")
     except Exception as e:
         print(f"Operation failed: {e}")
