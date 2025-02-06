@@ -1,4 +1,5 @@
 # client.py
+import json
 from pathlib import Path
 from typing import Generator, List
 import hashlib
@@ -9,16 +10,29 @@ import uuid
 import os
 from tqdm import tqdm
 import math
+from keybert import KeyBERT
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 
 class SecureFileUploader:
-    def __init__(self, server_url: str, block_size: int = 1024*1024):
+    def __init__(self, server_url: str, block_size: int = 1024 * 1024):
         self.server_url = server_url
         self.block_size = block_size
-        self.key = b'MySuperSecretKey12345MySuperSecretKey12345'[:32]
+        self.key = b"MySuperSecretKey12345MySuperSecretKey12345"[:32]
+        self.kw_model = KeyBERT()
+
+    def extract_keywords(self, block: bytes) -> list:
+        """Extract keywords from text file"""
+        try:
+            keywords = self.kw_model.extract_keywords(block.decode())
+            # Return only words without scores
+            return [word for word, _ in keywords]
+        except UnicodeDecodeError:
+            return []
 
     def split_file(self, file_path: Path) -> Generator[bytes, None, None]:
         """Split file into blocks"""
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             while True:
                 block = f.read(self.block_size)
                 if not block:
@@ -34,14 +48,14 @@ class SecureFileUploader:
         """Generate AES-CBC-MAC authentication tag"""
         iv = get_random_bytes(16)
         cipher = AES.new(self.key, AES.MODE_CBC, iv)
-        
+
         # Pad the block data
         padded_data = self._pad_data(block_data)
-        
+
         # Generate CBC-MAC
         ciphertext = cipher.encrypt(padded_data)
         auth_tag = ciphertext[-16:]  # Last block is the MAC
-        
+
         return iv.hex() + auth_tag.hex(), auth_tag
 
     def _pad_data(self, data: bytes) -> bytes:
@@ -50,82 +64,93 @@ class SecureFileUploader:
         padding = bytes([pad_len]) * pad_len
         return data + padding
 
+    def upload_block(self, block: bytes, file_id: str, pbar) -> None:
+        """Upload single block"""
+        block_id = self.generate_block_id(block, file_id)
+        auth_tag, _ = self.generate_auth_tag(block)
+        keywords = self.extract_keywords(block)
+
+        files = {"file": ("block", block, "application/octet-stream")}
+
+        data = {
+            "block_id": block_id,
+            "file_id": file_id,
+            "auth_tag": auth_tag,
+            "keywords": json.dumps(keywords),
+        }
+
+        response = requests.post(
+            f"{self.server_url}/upload-block", files=files, data=data
+        )
+
+        if response.status_code != 200:
+            raise Exception(f"Server error: {response.text}")
+
+        pbar.update(1)
+        return response.json()
+
     def upload_file(self, file_path: Path) -> str:
-        """Upload file in blocks"""
+        """Upload file in blocks using parallel threads"""
         file_id = str(uuid.uuid4())
         file_size = os.path.getsize(file_path)
         total_blocks = math.ceil(file_size / self.block_size)
+
+        blocks = list(self.split_file(file_path))
         uploaded_blocks = []
-        
+
         with tqdm(total=total_blocks, desc="Uploading blocks") as pbar:
-            for block in self.split_file(file_path):
-                block_id = self.generate_block_id(block, file_id)
-                auth_tag, _ = self.generate_auth_tag(block)
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = [
+                    executor.submit(self.upload_block, block, file_id, pbar)
+                    for block in blocks
+                ]
 
-                files = {
-                    'file': ('block', block, 'application/octet-stream')
-                }
-                
-                data = {
-                    'block_id': block_id,
-                    'file_id': file_id,
-                    'auth_tag': auth_tag
-                }
-
-                try:
-                    # Send as multipart form data
-                    response = requests.post(
-                        f"{self.server_url}/upload-block",
-                        files=files,
-                        data=data  # This will be sent as form fields
-                    )
-                    
-                    if response.status_code != 200:
-                        raise Exception(f"Server error: {response.text}")
-                    
-                    uploaded_blocks.append(response.json())
-                    pbar.update(1)
-                    
-                except Exception as e:
-                    raise Exception(f"Upload failed: {str(e)}")
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        uploaded_blocks.append(result)
+                    except Exception as e:
+                        raise Exception(f"Upload failed: {str(e)}")
 
         return file_id
-    
+
     def verify_blocks(self, file_id: str, block_ids: List[str]) -> bool:
         """Verify specific blocks"""
         try:
             response = requests.post(
                 f"{self.server_url}/verify-blocks",
-                json={"block_ids": block_ids, "file_id": file_id}
+                json={"block_ids": block_ids, "file_id": file_id},
             )
-            
+
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
-                
+
             data = response.json()
-            contents = [bytes.fromhex(content) for content in data['contents']]
-            received_auth_tags = data['auth_tags']
-            
+            contents = [bytes.fromhex(content) for content in data["contents"]]
+            received_auth_tags = data["auth_tags"]
+
             for content, received_auth in zip(contents, received_auth_tags):
                 # Extract IV from received auth tag (first 32 hex chars = 16 bytes)
                 iv = bytes.fromhex(received_auth[:32])
                 expected_auth = received_auth[32:]
-                
+
                 # Generate auth tag using the same IV
                 cipher = AES.new(self.key, AES.MODE_CBC, iv)
                 padded_data = self._pad_data(content)
                 ciphertext = cipher.encrypt(padded_data)
                 local_auth = ciphertext[-16:].hex()
-                
+
                 # Combine IV and local_auth to match the format
                 local_auth_combined = iv.hex() + local_auth
-                
+
                 if local_auth_combined != received_auth:
-                    print(f"Verification failed for block with auth tag: {received_auth}")
+                    print(
+                        f"Verification failed for block with auth tag: {received_auth}"
+                    )
                     return False
-                
+
             return True
-                
+
         except Exception as e:
             print(f"Verification failed: {str(e)}")
             return False
@@ -133,24 +158,24 @@ class SecureFileUploader:
 
 # Usage example
 if __name__ == "__main__":
-    uploader = SecureFileUploader("http://15.206.89.160:8000")
+    uploader = SecureFileUploader("http://13.203.101.102:8000")
     file_path = Path("example.txt")
-    
+
     try:
         file_id = uploader.upload_file(file_path)
         print(f"File uploaded successfully with ID: {file_id}")
-        
+
         # Get blocks for the file
         response = requests.get(f"{uploader.server_url}/blocks/{file_id}")
-        blocks = response.json()['blocks']
-        
+        blocks = response.json()["blocks"]
+
         # Verify first two blocks if available
-        block_ids = [block['block_id'] for block in blocks[:2]]
+        block_ids = [block["block_id"] for block in blocks[:2]]
         if block_ids:
             if uploader.verify_blocks(file_id, block_ids):
                 print("Blocks verified successfully")
             else:
                 print("Block verification failed")
-                
+
     except Exception as e:
         print(f"Operation failed: {e}")
