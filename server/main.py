@@ -55,7 +55,7 @@ async def upload_block(
     keywords: str = Form(...)
 ):
     try:
-        print(keywords.split(","))
+        print(keywords.split("#"))
         # Read block content
         content = await file.read()
         

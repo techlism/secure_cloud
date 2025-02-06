@@ -76,7 +76,7 @@ class SecureFileUploader:
             "block_id": block_id,
             "file_id": file_id,
             "auth_tag": auth_tag,
-            "keywords": json.dumps(keywords),
+            "keywords": keywords.join("#"),
         }
 
         response = requests.post(
