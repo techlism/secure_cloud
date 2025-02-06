@@ -51,9 +51,11 @@ async def upload_block(
     file: UploadFile = File(...),
     block_id: str = Form(...),  # Add Form import
     file_id: str = Form(...),
-    auth_tag: str = Form(...)
+    auth_tag: str = Form(...),
+    keywords: List[str] = Form(...)
 ):
     try:
+        print(keywords)
         # Read block content
         content = await file.read()
         
@@ -81,6 +83,7 @@ async def upload_block(
             VALUES (?, ?, ?, ?, ?)
         ''', (block_id, file_id, s3_url, auth_tag, datetime.now().isoformat()))
         conn.commit()
+        
         conn.close()
 
         logging.info(f"Successfully uploaded block {block_id} for file {file_id}")
