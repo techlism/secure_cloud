@@ -1,0 +1,11 @@
+# Server Dependencies
+fastapi==0.115.8
+uvicorn==0.34.0
+python-multipart==0.0.6
+
+# AWS
+boto3==1.36.14
+
+# Type Hints
+typing-extensions==4.8.0
+pydantic==2.4.2
