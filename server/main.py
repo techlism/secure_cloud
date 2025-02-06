@@ -52,10 +52,10 @@ async def upload_block(
     block_id: str = Form(...),  # Add Form import
     file_id: str = Form(...),
     auth_tag: str = Form(...),
-    keywords: List[str] = Form(...)
+    keywords: str = Form(...)
 ):
     try:
-        print(keywords)
+        print(keywords.split(","))
         # Read block content
         content = await file.read()
         
