@@ -96,8 +96,71 @@ def get_file_stats(file_id: str) -> Dict:
             'first_upload': row[1],
             'last_upload': row[2]
         }
-        
 
-if __name__ == '__main__':
-    # call to prnt all blocks
-    print(get_all_blocks())
+# Class to manage database configuration        
+class DatabaseConfigurator:
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+
+    @contextmanager
+    def get_connection(self):
+        """Context manager for SQLite connection."""
+        conn = sqlite3.connect(self.db_path)
+        try:
+            yield conn
+        finally:
+            conn.close()
+
+    def init_tables(self):
+        """Initializes the tables if they do not exist."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Create blocks table with composite primary key (block_id, file_id)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS blocks (
+                    block_id TEXT,
+                    file_id TEXT,
+                    s3_url TEXT,
+                    auth_tag TEXT,
+                    timestamp TEXT,
+                    PRIMARY KEY (block_id, file_id)
+                )
+            ''')
+            # Create keywords table with composite uniqueness on (block_id, file_id, keyword)
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS keywords (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    block_id TEXT NOT NULL,
+                    file_id TEXT NOT NULL,
+                    keyword TEXT NOT NULL,
+                    UNIQUE (block_id, file_id, keyword)
+                )
+            ''')
+            # Create an index on the keyword field for faster lookups
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_keyword ON keywords(keyword)')
+            conn.commit()
+            logging.info("Database tables initialized.")
+
+    def drop_table(self, table_name: str):
+        """Drops a single table if it exists."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+            conn.commit()
+            logging.info(f"Table '{table_name}' dropped.")
+
+    def drop_all_tables(self):
+        """Drops all schema-related tables."""
+        # Drop keywords first because of potential dependencies on blocks
+        self.drop_table("keywords")
+        self.drop_table("blocks")
+        logging.info("All tables dropped.")
+
+    def reinit_tables(self):
+        """Drops all tables and then reinitializes the schema."""
+        self.drop_all_tables()
+        self.init_tables()
+        logging.info("Tables reinitialized successfully.")
+
+# Create an instance using the configured database path
+db_configurator = DatabaseConfigurator(config.DATABASE_PATH)
