@@ -58,6 +58,7 @@ async def upload_block(
 ):
     try:
         keywords = keywords.split('#')
+        print(keywords)
         # Read block content
         content = await file.read()
         
@@ -277,3 +278,95 @@ async def get_table_contents_html(table_name: str):
     except Exception as e:
         logging.error(f"Error retrieving contents of table '{table_name}': {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+import sqlite3
+import logging
+import config  # Ensure config.DATABASE_PATH is defined
+
+app = FastAPI()
+
+@app.get("/admin/blocks-by-keyword/{keyword}", response_class=HTMLResponse)
+async def blocks_by_keyword(keyword: str):
+    """
+    Retrieves all blocks (with S3 URLs and related metadata) that have the specified keyword.
+    The result is returned as an HTML table.
+    """
+    try:
+        # Connect to the database and create a cursor.
+        conn = sqlite3.connect(config.DATABASE_PATH)
+        cursor = conn.cursor()
+
+        # Execute a join query on blocks and keywords where the keyword matches.
+        query = """
+            SELECT b.block_id, b.file_id, b.s3_url, b.auth_tag, b.timestamp
+            FROM blocks b
+            JOIN keywords k 
+                ON b.block_id = k.block_id AND b.file_id = k.file_id
+            WHERE k.keyword = ?
+            ORDER BY b.timestamp DESC
+        """
+        cursor.execute(query, (keyword,))
+        rows = cursor.fetchall()
+        # Get the column names for the table header.
+        columns = [description[0] for description in cursor.description]
+        conn.close()
+
+        # Build the HTML content with basic CSS styling.
+        html_content = f"""
+        <html>
+            <head>
+                <title>Blocks for Keyword: {keyword}</title>
+                <style>
+                    body {{
+                        font-family: Arial, sans-serif;
+                        margin: 20px;
+                    }}
+                    table {{
+                        border-collapse: collapse;
+                        width: 100%;
+                    }}
+                    th, td {{
+                        border: 1px solid #dddddd;
+                        text-align: left;
+                        padding: 8px;
+                    }}
+                    tr:nth-child(even) {{
+                        background-color: #f9f9f9;
+                    }}
+                    h2 {{
+                        color: #333;
+                    }}
+                </style>
+            </head>
+            <body>
+                <h2>Blocks for Keyword: {keyword}</h2>
+                <table>
+                    <thead>
+                        <tr>
+        """
+        # Add the header row.
+        for col in columns:
+            html_content += f"<th>{col}</th>"
+        html_content += "</tr></thead><tbody>"
+
+        # Add each row of data to the HTML table.
+        for row in rows:
+            html_content += "<tr>"
+            for cell in row:
+                html_content += f"<td>{cell}</td>"
+            html_content += "</tr>"
+
+        html_content += """
+                    </tbody>
+                </table>
+            </body>
+        </html>
+        """
+        return html_content
+
+    except Exception as e:
+        logging.error(f"Error retrieving blocks for keyword '{keyword}': {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
