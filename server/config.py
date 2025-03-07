@@ -15,6 +15,8 @@ AWS_CONFIG = {
     'region_name': 'ap-south-1'
 }
 
+P = 2**256 - 189
+
 BLOCK_SIZE = 1024 * 1024
 
 # Logging configuration

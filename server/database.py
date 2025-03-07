@@ -1,8 +1,8 @@
+# database.py
 import logging
 import sqlite3
 from contextlib import contextmanager
 import config
-
 
 @contextmanager
 def get_db_connection():
@@ -27,18 +27,32 @@ class DatabaseConfigurator:
             conn.close()
 
     def init_tables(self):
-        """Initializes the tables for entire files."""
+        """Initializes the tables for files, blocks, and tags."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             # Create files table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS files (
                     file_id TEXT PRIMARY KEY,
-                    s3_url TEXT,
-                    auth_tag TEXT,
+                    filename TEXT,
+                    total_blocks INTEGER,
                     timestamp TEXT
                 )
             ''')
+            
+            # Create blocks table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS blocks (
+                    file_id TEXT,
+                    block_idx INTEGER,
+                    s3_key TEXT,
+                    tag TEXT,
+                    block_size INTEGER,
+                    PRIMARY KEY (file_id, block_idx),
+                    FOREIGN KEY (file_id) REFERENCES files(file_id)
+                )
+            ''')
+            
             # Update keywords table to associate with file_id
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS keywords (
@@ -64,6 +78,7 @@ class DatabaseConfigurator:
     def drop_all_tables(self):
         """Drops all schema-related tables."""
         self.drop_table("keywords")
+        self.drop_table("blocks")
         self.drop_table("files")
         logging.info("All tables dropped.")
 
