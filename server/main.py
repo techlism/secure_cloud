@@ -125,36 +125,56 @@ async def generate_por_proof(request: Dict[str, Any]):
 
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            placeholders = ",".join(["?"] * len(challenge))
-            indices = [i for i, _ in challenge]
+            
+            # Find all blocks that match the challenge indices
+            block_indices = [i for i, _ in challenge]
+            placeholders = ",".join(["?"] * len(block_indices))
+            
             cursor.execute(f'''
                 SELECT block_idx, s3_key, tag, block_size
                 FROM blocks
                 WHERE file_id = ? AND block_idx IN ({placeholders})
-            ''', [file_id] + indices)
+            ''', [file_id] + block_indices)
+            
             blocks_data = cursor.fetchall()
 
         if not blocks_data:
             raise HTTPException(status_code=404, detail="No blocks found for challenge")
 
-        sigma = mu = 0
+        # Create a mapping from block_idx to coefficient for quick lookup
+        challenge_dict = {i: nu for i, nu in challenge}
+        
+        sigma = 0
+        mu = 0
+        
         for block_idx, s3_key, tag_hex, block_size in blocks_data:
+            # Get the correct coefficient for this block
+            if block_idx not in challenge_dict:
+                continue
+                
+            coeff = challenge_dict[block_idx]
+            
+            # Get block content from S3
             response = s3_client.get_object(
                 Bucket=config.AWS_CONFIG['bucket_name'],
                 Key=s3_key
             )
             block_content = response['Body'].read()
+            
+            # Compute the block's contribution to mu
             m = int.from_bytes(block_content, 'big') % p
-            tag = int.from_bytes(bytes.fromhex(tag_hex), 'big')
-            coeff = next(nu for i, nu in challenge if i == block_idx)
-            sigma = (sigma + coeff * tag) % p
             mu = (mu + coeff * m) % p
+            
+            # Compute the block's contribution to sigma
+            tag = int.from_bytes(bytes.fromhex(tag_hex), 'big')
+            sigma = (sigma + coeff * tag) % p
 
+        # Return the proof components
         return {
             "sigma": sigma.to_bytes(32, 'big').hex(),
             "mu": mu.to_bytes(32, 'big').hex()
         }
 
     except Exception as e:
-        logging.error(f"Error generating PoR proof for {file_id}: {str(e)}")
+        logging.error(f"Error generating PoR proof for {request.get('file_id', 'unknown')}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

@@ -71,6 +71,9 @@ class SecureFileClient:
             keywords = self.extract_keywords(content)
             blocks = self.split_into_blocks(content)
 
+            # Store alpha for this file to use during verification
+            self._store_file_alpha(file_id, self.alpha)
+            
             block_data = []
             for i, block in enumerate(blocks):
                 tag = self.compute_tag(block, i)
@@ -105,16 +108,59 @@ class SecureFileClient:
         except Exception as e:
             print(f"Upload failed: {str(e)}")
             raise
+    
+    def _store_file_alpha(self, file_id: str, alpha: int):
+        """Store the alpha value for a file (in a real system this would be more secure)."""
+        # In a real implementation, this would be stored securely
+        # For simplicity, we'll use a JSON file, but in production you'd use a secure database
+        try:
+            file_data = {}
+            alpha_file = Path("file_alphas.json")
+            if alpha_file.exists():
+                with open(alpha_file, "r") as f:
+                    file_data = json.load(f)
+            
+            file_data[file_id] = alpha
+            
+            with open(alpha_file, "w") as f:
+                json.dump(file_data, f)
+        except Exception as e:
+            print(f"Warning: Could not store alpha value: {str(e)}")
+    
+    def _get_file_alpha(self, file_id: str) -> int:
+        """Retrieve the alpha value for a file."""
+        try:
+            alpha_file = Path("file_alphas.json")
+            if not alpha_file.exists():
+                raise Exception(f"No alpha data found for file {file_id}")
+            
+            with open(alpha_file, "r") as f:
+                file_data = json.load(f)
+            
+            if file_id not in file_data:
+                raise Exception(f"No alpha data found for file {file_id}")
+            
+            return file_data[file_id]
+        except Exception as e:
+            print(f"Error retrieving alpha: {str(e)}")
+            raise
 
     def generate_por_challenge(self, file_id: str, total_blocks: int) -> List[tuple[int, int]]:
         """Generate a PoR challenge for a file."""
         indices = sample(range(0, total_blocks), min(self.l, total_blocks))
         return [(i, randint(1, self.p - 1)) for i in indices]
 
-    def verify_por_proof(self, challenge: List[tuple[int, int]], sigma: int, mu: int) -> bool:
+    def verify_por_proof(self, file_id: str, challenge: List[tuple[int, int]], sigma: int, mu: int) -> bool:
         """Verify the PoR proof from the server."""
-        expected_sigma = (self.alpha * mu + sum(nu * self.prf(i) for i, nu in challenge)) % self.p
-        return sigma == expected_sigma
+        # Get the specific alpha used for this file
+        try:
+            alpha = self._get_file_alpha(file_id)
+            expected_sigma = (alpha * mu + sum(nu * self.prf(i) for i, nu in challenge)) % self.p
+            return sigma == expected_sigma
+        except Exception as e:
+            print(f"Verification error: {str(e)}")
+            # If we can't find the alpha, verification fails
+            return False
 
     def request_por_proof(self, file_id: str) -> Dict:
         """Request and verify a PoR proof for a file."""
@@ -123,9 +169,10 @@ class SecureFileClient:
             with requests.get(f"{self.server_url}/file-info?file_id={file_id}") as response:
                 if response.status_code != 200:
                     raise Exception(f"Server error: {response.text}")
-                total_blocks = response.json()["total_blocks"]
+                total_blocks = response.json()["total_blocks"]    
 
             challenge = self.generate_por_challenge(file_id, total_blocks)
+            print(f"Generated challenge with {len(challenge)} blocks")
             response = requests.post(f"{self.server_url}/por-proof", json={
                 "file_id": file_id,
                 "challenge": [{"index": i, "coeff": nu} for i, nu in challenge]
@@ -136,7 +183,7 @@ class SecureFileClient:
             data = response.json()
             sigma = int(data["sigma"], 16)
             mu = int(data["mu"], 16)
-            verified = self.verify_por_proof(challenge, sigma, mu)
+            verified = self.verify_por_proof(file_id, challenge, sigma, mu)
             return {"verified": verified, "file_id": file_id}
 
         except Exception as e:
