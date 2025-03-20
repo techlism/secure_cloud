@@ -117,29 +117,35 @@ async def get_file_info(file_id: str = Query(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/por-proof")
-@app.post("/por-proof")
 async def generate_por_proof(request: Dict[str, Any]):
+    """Generate a PoR proof across multiple files based on the challenge."""
     try:
         file_ids = request["file_ids"]
         challenge_items = request["challenge"]
         p = config.P
 
+        # Organize challenge by file_id
         challenge_dict = {item["file_id"]: {} for item in challenge_items}
         for item in challenge_items:
             challenge_dict[item["file_id"]][item["index"]] = item["coeff"]
 
         logging.info(f"Processing PoR challenge for files {file_ids} with {len(challenge_items)} blocks")
 
+        if not challenge_dict:
+            raise HTTPException(status_code=400, detail="Challenge contains no blocks")
+
+        # Aggregate sigma and mu across all files
         sigma = 0
         mu_dict = {file_id: 0 for file_id in file_ids}
 
         for file_id in file_ids:
             if file_id not in challenge_dict:
-                continue
+                continue  # Skip files with no challenged blocks
 
             block_indices = list(challenge_dict[file_id].keys())
             placeholders = ",".join(["?" for _ in block_indices])
 
+            # Query blocks for this file
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
@@ -147,6 +153,7 @@ async def generate_por_proof(request: Dict[str, Any]):
                     FROM blocks
                     WHERE file_id = ? AND block_idx IN ({placeholders})
                 ''', [file_id] + block_indices)
+                
                 blocks_data = cursor.fetchall()
 
             if not blocks_data:
@@ -158,12 +165,27 @@ async def generate_por_proof(request: Dict[str, Any]):
 
             for block_idx, (s3_key, tag_hex, _) in found_blocks.items():
                 coeff = challenge_dict[file_id][block_idx]
-                block_content = s3_client.get_object(...).read()
+
+                # Retrieve block from S3 using keyword arguments
+                try:
+                    response = s3_client.get_object(
+                        Bucket=config.AWS_CONFIG['bucket_name'],
+                        Key=s3_key
+                    )
+                    block_content = response['Body'].read()
+                except Exception as e:
+                    logging.error(f"Error retrieving block {block_idx} from S3 for file {file_id}: {str(e)}")
+                    continue
+
+                # Contribution to mu
                 m = int.from_bytes(block_content, 'big') % p
                 mu_dict[file_id] = (mu_dict[file_id] + coeff * m) % p
+
+                # Contribution to sigma
                 tag = int.from_bytes(bytes.fromhex(tag_hex), 'big')
                 sigma = (sigma + coeff * tag) % p
 
+        # Prepare response
         return {
             "sigma": sigma.to_bytes(32, 'big').hex(),
             "mu": {file_id: mu.to_bytes(32, 'big').hex() for file_id, mu in mu_dict.items()}
