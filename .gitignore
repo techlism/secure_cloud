@@ -8,3 +8,4 @@ bin/
 *.pyc
 app/__pycache__/
 log/app.log
+client/*.txt
