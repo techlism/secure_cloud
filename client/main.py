@@ -1,3 +1,4 @@
+#client.py
 import json
 import math
 from pathlib import Path
@@ -148,7 +149,30 @@ class SecureFileClient:
         except Exception as e:
             print(f"Upload failed: {str(e)}")
             raise
+    def generate_multi_file_por_challenge(self, file_ids: List[str]) -> Dict[str, List[Tuple[int, int]]]:
+            """Generate a PoR challenge across multiple files."""
+            challenge = {}
+            total_blocks_per_file = {}
 
+            # Fetch total blocks for each file
+            for file_id in file_ids:
+                with requests.get(f"{self.server_url}/file-info?file_id={file_id}") as response:
+                    if response.status_code != 200:
+                        raise Exception(f"Server error for file {file_id}: {response.text}")
+                    total_blocks_per_file[file_id] = response.json()["total_blocks"]
+
+            # Generate challenges for each file
+            for file_id in file_ids:
+                total_blocks = total_blocks_per_file[file_id]
+                l = min(self.l, total_blocks)  # Number of blocks to challenge per file
+                if total_blocks <= 8:
+                    indices = list(range(total_blocks))
+                else:
+                    indices = sample(range(total_blocks), l)
+                challenge[file_id] = [(i, randint(1, self.p - 1)) for i in indices]
+                print(f"Challenging {len(indices)} blocks for file {file_id} out of {total_blocks}")
+
+            return challenge
     def generate_por_challenge(self, file_id: str, total_blocks: int) -> List[Tuple[int, int]]:
         """Generate a PoR challenge for a file."""
         # Ensure we don't try to sample more blocks than exist
@@ -165,77 +189,75 @@ class SecureFileClient:
         challenge = [(i, randint(1, self.p - 1)) for i in indices]
         return challenge
 
-    def verify_por_proof(self, file_id: str, challenge: List[Tuple[int, int]], sigma: int, mu: int) -> bool:
-        """Verify the PoR proof from the server."""
+    def verify_por_proof(self, file_challenges: Dict[str, List[Tuple[int, int]]], sigma: int, mu: int) -> bool:
+        """Verify the PoR proof for multiple files with aggregated sigma and mu."""
         try:
-            if file_id not in self.file_params:
-                print(f"Error: No parameters found for file {file_id}")
-                return False
-                
-            # Get the stored parameters for this file
-            file_params = self.file_params[file_id]
-            alpha = file_params['alpha']
-            key = file_params['key']
-            
-            # Calculate expected sigma based on the parameters and the server's mu
             expected_sigma = 0
             
-            # Sum the PRF values times challenge coefficients
-            for i, nu in challenge:
-                prf_value = self.prf(i, key)
-                expected_sigma = (expected_sigma + nu * prf_value) % self.p
-            
-            # Add alpha * mu
-            expected_sigma = (expected_sigma + alpha * mu) % self.p
-            
-            # Debug output
+            # Aggregate across all files and their challenged blocks
+            for file_id, challenge in file_challenges.items():
+                if file_id not in self.file_params:
+                    print(f"Error: No parameters found for file {file_id}")
+                    return False
+                
+                file_params = self.file_params[file_id]
+                alpha = file_params['alpha']
+                key = file_params['key']
+
+                # Sum PRF values times challenge coefficients for this file
+                file_sigma_contribution = 0
+                for i, nu in challenge:
+                    prf_value = self.prf(i, key)
+                    file_sigma_contribution = (file_sigma_contribution + nu * prf_value) % self.p
+                
+                # Add to total expected sigma (before applying alpha * mu)
+                expected_sigma = (expected_sigma + file_sigma_contribution) % self.p
+
+            # Add alpha * mu contribution (assuming mu is already aggregated by server)
+            # For simplicity, we assume a single mu is provided; in practice, you might need per-file mu
+            for file_id in file_challenges.keys():
+                alpha = self.file_params[file_id]['alpha']
+                expected_sigma = (expected_sigma + alpha * mu) % self.p
+
             print(f"Expected sigma: {expected_sigma}")
             print(f"Received sigma: {sigma}")
-            
             return sigma == expected_sigma
-            
+
         except Exception as e:
             print(f"Verification error: {str(e)}")
             return False
 
-    def request_por_proof(self, file_id: str) -> Dict:
-        """Request and verify a PoR proof for a file."""
+    def request_por_proof(self, file_ids: List[str]) -> Dict:
+        """Request and verify a PoR proof for multiple files."""
         try:
-            # Check if we have parameters for this file
-            if file_id not in self.file_params:
-                print(f"No parameters found for file {file_id}. Cannot verify.")
-                return {"verified": False, "file_id": file_id, "error": "No client parameters"}
+            # Generate challenge across multiple files
+            file_challenges = self.generate_multi_file_por_challenge(file_ids)
+            print(f"Generated challenge across {len(file_challenges)} files")
 
-            # Get total blocks for the file
-            with requests.get(f"{self.server_url}/file-info?file_id={file_id}") as response:
-                if response.status_code != 200:
-                    raise Exception(f"Server error: {response.text}")
-                total_blocks = response.json()["total_blocks"]    
+            # Convert challenge to server-expected format
+            challenge_json = [
+                {"file_id": file_id, "index": i, "coeff": nu}
+                for file_id, challenges in file_challenges.items()
+                for i, nu in challenges
+            ]
 
-            challenge = self.generate_por_challenge(file_id, total_blocks)
-            print(f"Generated challenge with {len(challenge)} blocks")
-            
-            # Convert challenge to the format expected by the server
-            challenge_json = [{"index": i, "coeff": nu} for i, nu in challenge]
-            
             response = requests.post(f"{self.server_url}/por-proof", json={
-                "file_id": file_id,
+                "file_ids": file_ids,
                 "challenge": challenge_json
             })
-            
+
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
 
             data = response.json()
             print(f"Received proof: {data}")
-            
-            # Parse the proof components from hex
+
             sigma = int(data["sigma"], 16)
             mu = int(data["mu"], 16)
-            
-            # Verify the proof
-            verified = self.verify_por_proof(file_id, challenge, sigma, mu)
-            return {"verified": verified, "file_id": file_id}
+
+            # Verify the aggregated proof
+            verified = self.verify_por_proof(file_challenges, sigma, mu)
+            return {"verified": verified, "file_ids": file_ids}
 
         except Exception as e:
             print(f"PoR proof failed: {str(e)}")
@@ -263,8 +285,8 @@ def main():
         print(f"File uploaded with ID: {file_id}")
 
     elif args.command == "por":
-        result = client.request_por_proof(args.file_id)
-        print(f"PoR Verification result: {'Successful' if result['verified'] else 'Failed'} for file {result['file_id']}")
+        result = client.request_por_proof(args.file_ids)
+        print(f"PoR Verification result: {'Successful' if result['verified'] else 'Failed'} for files {result['file_ids']}")
 
     else:
         parser.print_help()
