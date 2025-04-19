@@ -1,272 +1,196 @@
-#client.py
+#server.py
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query
+from fastapi.responses import JSONResponse
+import boto3
+import sqlite3
+import logging
 import json
-import math
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
-import requests
-import uuid
-from keybert import KeyBERT
-import os
-import hmac
-import hashlib
-from random import randint, sample
-import pickle
-
-# Assume config.py defines P (large prime) and BLOCK_SIZE
+from typing import List, Dict, Optional, Any
+from datetime import datetime
 import config
+from database import db_configurator, get_db_connection
 
-class SecureFileClient:
-    def __init__(self, server_url: str):
-        """Initialize the secure file client with Shacham-Waters parameters."""
-        self.server_url = server_url
-        self.p = config.P  # Large prime from config, e.g., 2**256 - 2**224 + 2**192 + 2**96 - 1
-        self.alpha = randint(1, self.p - 1)  # Secret scalar
-        self.k = os.urandom(32)  # PRF key (256 bits)
-        self.kw_model = KeyBERT()
-        self.block_size = config.BLOCK_SIZE
-        self.l = 80  # Security parameter: number of blocks to challenge
-        
-        # Store parameters for each file
-        self._init_storage()
+# Setup logging
+logging.basicConfig(
+    filename=config.LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-    def _init_storage(self):
-        """Initialize storage for file parameters."""
-        self.storage_file = Path("client_storage.pickle")
-        if not self.storage_file.exists():
-            self.file_params = {}
-            self._save_storage()
-        else:
-            self._load_storage()
+app = FastAPI(title="Secure File Server with Shacham-Waters PoR")
 
-    def _save_storage(self):
-        """Save file parameters to disk."""
-        with open(self.storage_file, "wb") as f:
-            pickle.dump(self.file_params, f)
+# Initialize S3 client
+s3_client = boto3.client('s3', region_name=config.AWS_CONFIG['region_name'])
 
-    def _load_storage(self):
-        """Load file parameters from disk."""
-        try:
-            with open(self.storage_file, "rb") as f:
-                self.file_params = pickle.load(f)
-        except Exception as e:
-            print(f"Error loading client storage: {str(e)}")
-            self.file_params = {}
+def init_app():
+    """Initialize the application."""
+    db_configurator.init_tables()
+    try:
+        s3_client.head_bucket(Bucket=config.AWS_CONFIG['bucket_name'])
+    except:
+        logging.info(f"Creating S3 bucket: {config.AWS_CONFIG['bucket_name']}")
+        s3_client.create_bucket(
+            Bucket=config.AWS_CONFIG['bucket_name'],
+            CreateBucketConfiguration={'LocationConstraint': config.AWS_CONFIG['region_name']}
+        )
 
-    def prf(self, i: int, key: bytes = None) -> int:
-        """Pseudorandom function using HMAC-SHA256, reduced modulo p."""
-        if key is None:
-            key = self.k
-        h = hmac.new(key, str(i).encode(), hashlib.sha256).digest()
-        return int.from_bytes(h, 'big') % self.p
+init_app()
 
-    def compute_tag(self, block: bytes, block_idx: int, alpha: int = None, key: bytes = None) -> int:
-        """Compute Shacham-Waters tag: σ_i = f_k(i) + α * m_i mod p."""
-        if alpha is None:
-            alpha = self.alpha
-        m = int.from_bytes(block, 'big') % self.p
-        return (self.prf(block_idx, key) + alpha * m) % self.p
+@app.post("/create-file")
+async def create_file(metadata: Dict[str, Any]):
+    """Create a new file record with metadata."""
+    try:
+        file_id = metadata["file_id"]
+        filename = metadata["filename"]
+        keywords = metadata["keywords"]
+        total_blocks = metadata["total_blocks"]
+        blocks = metadata["blocks"]
 
-    def extract_keywords(self, content: bytes) -> List[str]:
-        """Extract keywords from file content."""
-        try:
-            print("Extracting Keywords\n")
-            keywords = self.kw_model.extract_keywords(content.decode())
-            return [word for word, _ in keywords]
-        except Exception as e:
-            print(f"Error extracting keywords: {str(e)}")
-            return []
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO files (file_id, filename, total_blocks, timestamp)
+                VALUES (?, ?, ?, ?)
+            ''', (file_id, filename, total_blocks, datetime.now().isoformat()))
 
-    def split_into_blocks(self, content: bytes) -> List[bytes]:
-        """Split file content into fixed-size blocks."""
-        print("File Splitting\n")
-        blocks = []
-        total_size = len(content)
-        num_blocks = math.ceil(total_size / self.block_size)
+            for keyword in keywords:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO keywords (file_id, keyword)
+                    VALUES (?, ?)
+                ''', (file_id, keyword))
 
-        for i in range(num_blocks):
-            start = i * self.block_size
-            end = min(start + self.block_size, total_size)
-            block = content[start:end]
-            if len(block) < self.block_size:
-                block = block + b'\0' * (self.block_size - len(block))
-            blocks.append(block)
-        return blocks
+            for block in blocks:
+                cursor.execute('''
+                    INSERT INTO blocks (file_id, block_idx, tag, block_size, s3_key)
+                    VALUES (?, ?, ?, ?, ?)
+                ''', (
+                    file_id,
+                    block["block_idx"],
+                    block["tag"],
+                    block["size"],
+                    f"blocks/{file_id}/{block['block_idx']}"
+                ))
+            conn.commit()
 
-    def upload_file(self, file_path: Path) -> str:
-        """Upload a file with Shacham-Waters tags for each block."""
-        print("Uploading File\n")
-        try:
-            file_id = str(uuid.uuid4())
-            with open(file_path, "rb") as f:
-                content = f.read()
+        return {"status": "success", "file_id": file_id}
 
-            # Generate new key and alpha for this file
-            file_key = os.urandom(32)
-            file_alpha = randint(1, self.p - 1)
-            
-            # Store parameters for this file
-            self.file_params[file_id] = {
-                'alpha': file_alpha,
-                'key': file_key,
-                'filename': file_path.name
-            }
-            self._save_storage()
+    except Exception as e:
+        logging.error(f"Error creating file record: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-            keywords = self.extract_keywords(content)
-            blocks = self.split_into_blocks(content)
-            
-            block_data = []
-            for i, block in enumerate(blocks):
-                tag = self.compute_tag(block, i, file_alpha, file_key)
-                block_data.append({
-                    "block_idx": i,
-                    "tag": tag.to_bytes(32, 'big').hex(),  # Store as hex string
-                    "size": len(block)
-                })
+@app.post("/upload-block")
+async def upload_block(
+    block: UploadFile = File(...),
+    file_id: str = Form(...),
+    block_idx: int = Form(...)
+):
+    """Upload a file block to S3."""
+    try:
+        content = await block.read()
+        s3_key = f"blocks/{file_id}/{block_idx}"
+        s3_client.put_object(
+            Bucket=config.AWS_CONFIG['bucket_name'],
+            Key=s3_key,
+            Body=content
+        )
+        return {"status": "success", "file_id": file_id, "block_idx": block_idx}
 
-            metadata = {
-                "file_id": file_id,
-                "filename": file_path.name,
-                "keywords": keywords,
-                "total_blocks": len(blocks),
-                "blocks": block_data
-            }
+    except Exception as e:
+        logging.error(f"Error uploading block {block_idx} of file {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-            response = requests.post(f"{self.server_url}/create-file", json=metadata)
-            if response.status_code != 200:
-                raise Exception(f"Server error: {response.text}")
+@app.get("/file-info")
+async def get_file_info(file_id: str = Query(...)):
+    """Get file info (e.g., total blocks) for PoR challenge."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT total_blocks FROM files WHERE file_id = ?
+            ''', (file_id,))
+            result = cursor.fetchone()
+            if not result:
+                raise HTTPException(status_code=404, detail="File not found")
+            return {"file_id": file_id, "total_blocks": result[0]}
+    except Exception as e:
+        logging.error(f"Error retrieving file info for {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-            for i, block in enumerate(blocks):
-                files = {"block": (f"{file_id}_block_{i}", block, "application/octet-stream")}
-                data = {"file_id": file_id, "block_idx": i}
-                response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
-                if response.status_code != 200:
-                    raise Exception(f"Server error uploading block {i}: {response.text}")
+@app.post("/por-proof")
+async def generate_por_proof(request: Dict[str, Any]):
+    """Generate a PoR proof across multiple files based on the challenge."""
+    try:
+        file_ids = request["file_ids"]
+        challenge_items = request["challenge"]
+        p = config.P
 
-            print(f"Successfully uploaded file {file_path.name} with ID: {file_id}")
-            return file_id
+        # Organize challenge by file_id
+        challenge_dict = {item["file_id"]: {} for item in challenge_items}
+        for item in challenge_items:
+            challenge_dict[item["file_id"]][item["index"]] = item["coeff"]
 
-        except Exception as e:
-            print(f"Upload failed: {str(e)}")
-            raise
-    def generate_multi_file_por_challenge(self, file_ids: List[str]) -> Dict[str, List[Tuple[int, int]]]:
-            """Generate a PoR challenge across multiple files."""
-            challenge = {}
-            total_blocks_per_file = {}
+        logging.info(f"Processing PoR challenge for files {file_ids} with {len(challenge_items)} blocks")
 
-            # Fetch total blocks for each file
-            for file_id in file_ids:
-                with requests.get(f"{self.server_url}/file-info?file_id={file_id}") as response:
-                    if response.status_code != 200:
-                        raise Exception(f"Server error for file {file_id}: {response.text}")
-                    total_blocks_per_file[file_id] = response.json()["total_blocks"]
+        if not challenge_dict:
+            raise HTTPException(status_code=400, detail="Challenge contains no blocks")
 
-            # Generate challenges for each file
-            for file_id in file_ids:
-                total_blocks = total_blocks_per_file[file_id]
-                l = min(self.l, total_blocks)  # Number of blocks to challenge per file
-                if total_blocks <= 8:
-                    indices = list(range(total_blocks))
-                else:
-                    indices = sample(range(total_blocks), l)
-                challenge[file_id] = [(i, randint(1, self.p - 1)) for i in indices]
-                print(f"Challenging {len(indices)} blocks for file {file_id} out of {total_blocks}")
+        # Aggregate sigma and mu across all files
+        sigma = 0
+        mu_dict = {file_id: 0 for file_id in file_ids}
 
-            return challenge
-    def generate_por_challenge(self, file_id: str, total_blocks: int) -> List[Tuple[int, int]]:
-        """Generate a PoR challenge for a file."""
-        # Ensure we don't try to sample more blocks than exist
-        l = min(self.l, total_blocks)
-        # If there are very few blocks, we might need to challenge all of them
-        if total_blocks <= 8:
-            indices = list(range(total_blocks))
-        else:
-            indices = sample(range(total_blocks), l)
-        
-        print(f"Challenging {len(indices)} blocks out of {total_blocks} total blocks")
-        
-        # Generate random coefficients for each challenged block
-        challenge = [(i, randint(1, self.p - 1)) for i in indices]
-        return challenge
+        for file_id in file_ids:
+            if file_id not in challenge_dict:
+                continue  # Skip files with no challenged blocks
 
-    def verify_por_proof(self, file_challenges: Dict[str, List[Tuple[int, int]]], sigma: int, mu_dict: Dict[str, int]) -> bool: 
-        expected_sigma = 0
-        for file_id, challenge in file_challenges.items():
-            if file_id not in self.file_params:
-                print(f"Error: No parameters found for file {file_id}")
-                return False
+            block_indices = list(challenge_dict[file_id].keys())
+            placeholders = ",".join(["?" for _ in block_indices])
+
+            # Query blocks for this file
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f'''
+                    SELECT block_idx, s3_key, tag, block_size
+                    FROM blocks
+                    WHERE file_id = ? AND block_idx IN ({placeholders})
+                ''', [file_id] + block_indices)
                 
-            file_params = self.file_params[file_id]
-            alpha = file_params['alpha']
-            key = file_params['key']
+                blocks_data = cursor.fetchall()
 
-            file_sigma_contribution = 0
-            for i, nu in challenge:
-                prf_value = self.prf(i, key)
-                file_sigma_contribution = (file_sigma_contribution + nu * prf_value) % self.p
-            
-            expected_sigma = (expected_sigma + file_sigma_contribution) % self.p
-            expected_sigma = (expected_sigma + alpha * mu_dict[file_id]) % self.p
+            if not blocks_data:
+                logging.warning(f"No blocks found for file {file_id} with indices {block_indices}")
+                continue
 
-        print(f"Expected sigma: {expected_sigma}")
-        print(f"Received sigma: {sigma}")
-        return sigma == expected_sigma
-      
-        
-    def request_por_proof(self, file_ids: List[str]) -> Dict:
-        try:
-            file_challenges = self.generate_multi_file_por_challenge(file_ids)
-            challenge_json = [{"file_id": file_id, "index": i, "coeff": nu} 
-                            for file_id, challenges in file_challenges.items() 
-                            for i, nu in challenges]
+            found_blocks = {block_idx: (s3_key, tag_hex, block_size) 
+                           for block_idx, s3_key, tag_hex, block_size in blocks_data}
 
-            response = requests.post(f"{self.server_url}/por-proof", json={
-                "file_ids": file_ids,
-                "challenge": challenge_json
-            })
+            for block_idx, (s3_key, tag_hex, _) in found_blocks.items():
+                coeff = challenge_dict[file_id][block_idx]
 
-            if response.status_code != 200:
-                raise Exception(f"Server error: {response.text}")
+                # Retrieve block from S3 using keyword arguments
+                try:
+                    response = s3_client.get_object(
+                        Bucket=config.AWS_CONFIG['bucket_name'],
+                        Key=s3_key
+                    )
+                    block_content = response['Body'].read()
+                except Exception as e:
+                    logging.error(f"Error retrieving block {block_idx} from S3 for file {file_id}: {str(e)}")
+                    continue
 
-            data = response.json()
-            sigma = int(data["sigma"], 16)
-            mu_dict = {file_id: int(mu_hex, 16) for file_id, mu_hex in data["mu"].items()}
+                # Contribution to mu
+                m = int.from_bytes(block_content, 'big') % p
+                mu_dict[file_id] = (mu_dict[file_id] + coeff * m) % p
 
-            verified = self.verify_por_proof(file_challenges, sigma, mu_dict)
-            return {"verified": verified, "file_ids": file_ids}
+                # Contribution to sigma
+                tag = int.from_bytes(bytes.fromhex(tag_hex), 'big')
+                sigma = (sigma + coeff * tag) % p
 
-        except Exception as e:
-            print(f"PoR proof failed: {str(e)}")
-            raise
-def main():
-    import argparse
+        # Prepare response
+        return {
+            "sigma": sigma.to_bytes(32, 'big').hex(),
+            "mu": {file_id: mu.to_bytes(32, 'big').hex() for file_id, mu in mu_dict.items()}
+        }
 
-    parser = argparse.ArgumentParser(description="Secure File Client with Shacham-Waters PoR")
-    parser.add_argument("--server", type=str, default="http://13.232.216.193:8000", help="Server URL")
-    subparsers = parser.add_subparsers(dest="command", help="Command to execute", required=True)
-
-    # Upload subcommand
-    upload_parser = subparsers.add_parser("upload", help="Upload a file")
-    upload_parser.add_argument("file", type=str, help="Path to the file")
-
-    # PoR subcommand
-    por_parser = subparsers.add_parser("por", help="Request PoR proof for multiple files")
-    por_parser.add_argument("file_ids", type=str, nargs="+", help="File IDs to verify")
-
-    args = parser.parse_args()
-    server_url = args.server
-    client = SecureFileClient(server_url)
-
-    if args.command == "upload":
-        file_id = client.upload_file(Path(args.file))
-        print(f"File uploaded with ID: {file_id}")
-
-    elif args.command == "por":
-        result = client.request_por_proof(args.file_ids)
-        print(f"PoR Verification result: {'Successful' if result['verified'] else 'Failed'} for files {result['file_ids']}")
-
-    else:
-        parser.print_help()
-
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        logging.error(f"Error generating PoR proof: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
