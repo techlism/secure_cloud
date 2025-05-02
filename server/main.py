@@ -101,20 +101,59 @@ async def upload_block(
 
 @app.get("/file-info")
 async def get_file_info(file_id: str = Query(...)):
-    """Get file info (e.g., total blocks) for PoR challenge."""
+    """Get detailed file information from the database."""
     try:
         with get_db_connection() as conn:
             cursor = conn.cursor()
+
+            # Get basic file info from the 'files' table
             cursor.execute('''
-                SELECT total_blocks FROM files WHERE file_id = ?
+                SELECT filename, total_blocks, timestamp
+                FROM files
+                WHERE file_id = ?
             ''', (file_id,))
-            result = cursor.fetchone()
-            if not result:
+            file_result = cursor.fetchone()
+
+            if not file_result:
                 raise HTTPException(status_code=404, detail="File not found")
-            return {"file_id": file_id, "total_blocks": result[0]}
+
+            filename, total_blocks, timestamp = file_result
+
+            # Calculate total file size from the 'blocks' table
+            cursor.execute('''
+                SELECT SUM(block_size)
+                FROM blocks
+                WHERE file_id = ?
+            ''', (file_id,))
+            size_result = cursor.fetchone()
+            total_size = size_result[0] if size_result and size_result[0] is not None else 0
+
+            # Get associated keywords
+            cursor.execute('''
+                SELECT keyword
+                FROM keywords
+                WHERE file_id = ?
+            ''', (file_id,))
+            keywords = [row[0] for row in cursor.fetchall()]
+
+            return {
+                "file_id": file_id,
+                "filename": filename,
+                "total_blocks": total_blocks,
+                "file_size": total_size,
+                "keywords": keywords,
+                "upload_date": timestamp # Using the timestamp from files table
+            }
+
+    except sqlite3.Error as db_err:
+        logging.error(f"Database error retrieving file info for {file_id}: {str(db_err)}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(db_err)}")
+    except HTTPException as http_exc:
+        # Re-raise HTTP exceptions (like 404)
+        raise http_exc
     except Exception as e:
-        logging.error(f"Error retrieving file info for {file_id}: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Unexpected error retrieving file info for {file_id}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
 
 @app.post("/por-proof")
 async def generate_por_proof(request: Dict[str, Any]):

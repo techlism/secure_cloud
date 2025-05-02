@@ -1,0 +1,34 @@
+2025-05-01 18:00:24,778 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-01 18:00:24,778 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-01 18:00:27,770 - SecureFileClient - INFO - Uploading file: video.mkv
+2025-05-01 18:00:27,770 - SecureFileClient - INFO - Processing non-text file: video.mkv
+2025-05-01 18:00:28,437 - SecureFileClient - INFO - Processing video.mkv detected as video
+2025-05-01 18:03:25,200 - SecureFileClient - ERROR - Error handling non-text file: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2025-05-01 18:03:25,200 - SecureFileClient - ERROR - Upload failed: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))
+2025-05-01 18:45:59,048 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-01 18:45:59,049 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-01 18:46:04,112 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-01 18:46:04,113 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-01 18:46:04,200 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-01 18:47:37,840 - SecureFileClient - INFO - Successfully uploaded non-text file output_480p.mkv with ID: 893b7fdd-aeeb-4636-b88a-1d368519840b
+2025-05-01 18:50:29,620 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-01 18:50:29,620 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-01 18:52:37,739 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-01 18:52:37,739 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-01 18:52:40,477 - SecureFileClient - INFO - Uploading file: image.png
+2025-05-01 18:52:40,477 - SecureFileClient - INFO - Processing non-text file: image.png
+2025-05-01 18:52:40,477 - SecureFileClient - INFO - Processing image.png detected as document
+2025-05-01 18:52:40,618 - docling.document_converter - INFO - Going to convert document batch...
+2025-05-01 18:52:40,618 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 70041f74270850b7bedf7c8f5c2dcede
+2025-05-01 18:52:40,628 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-01 18:52:40,628 - docling.models.factories - INFO - Registered ocr engines: ['easyocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2025-05-01 18:52:40,723 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-01 18:52:42,304 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-01 18:52:43,352 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-01 18:52:43,792 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-01 18:52:43,793 - docling.models.factories - INFO - Registered picture descriptions: ['vlm', 'api']
+2025-05-01 18:52:43,793 - docling.pipeline.base_pipeline - INFO - Processing document image.png
+2025-05-01 18:52:53,588 - docling.document_converter - INFO - Finished converting document image.png in 13.11 sec.
+2025-05-01 18:52:54,082 - SecureFileClient - INFO - Successfully uploaded non-text file image.png with ID: 7f75e02e-a60d-4119-9d77-e6707e804e4c
+2025-05-01 18:53:19,478 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-01 18:53:19,479 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
