@@ -185,7 +185,6 @@ class SecureFileClient:
                 subtitle_content = ""
                 try:
                     # First try with subtitle streams
-                    logger.debug(f"Attempting to extract subtitle streams from {file_path.name}")
                     (
                         ffmpeg
                         .input(str(file_path))
@@ -198,7 +197,6 @@ class SecureFileClient:
                             subtitle_content = f.read()
                         logger.info(f"Successfully extracted subtitle stream from {file_path.name}")
                 except ffmpeg.Error:
-                    logger.debug(f"No subtitle stream found in {file_path.name}, trying individual streams")
                     # If no embedded subtitles found, try extracting text from different streams
                     for i in range(5):  # Try the first 5 potential subtitle streams
                         try:
@@ -216,7 +214,6 @@ class SecureFileClient:
                                 logger.info(f"Successfully extracted subtitle from stream {i} of {file_path.name}")
                                 break
                         except ffmpeg.Error:
-                            logger.debug(f"No subtitles in stream {i} of {file_path.name}")
                             continue
                 
                 if not subtitle_content:
@@ -273,7 +270,6 @@ class SecureFileClient:
             
         if KEYBERT_AVAILABLE:
             try:
-                logger.debug(f"Using KeyBERT to extract keywords from {file_path.name}")
                 keywords = self.kw_model.extract_keywords(content)
                 extracted_kw = [word for word, _ in keywords]
                 if extracted_kw:
@@ -283,7 +279,6 @@ class SecureFileClient:
                 logger.error(f"KeyBERT extraction error: {str(e)}")
         
         # Fallback: Basic keyword extraction from content
-        logger.debug(f"Using fallback keyword extraction for {file_path.name}")
         words = re.findall(r'\b\w+\b', content.lower())
         # Filter common words and short words
         stopwords = {'the', 'and', 'of', 'to', 'a', 'in', 'for', 'is', 'on', 'that', 'by', 'this', 'with', 'you', 'it'}
@@ -298,10 +293,10 @@ class SecureFileClient:
         logger.info(f"Fallback method extracted keywords: {extracted_keywords}")
         return extracted_keywords
 
-    def get_content_and_keywords(self, file_path: Path) -> Tuple[Optional[bytes], List[str]]:
+    def get_content_and_keywords(self, file_path: Path) -> Tuple[bytes, List[str]]:
         """
         Process file content based on file type and extract keywords.
-        Returns the file content (or None for binary files) and keywords.
+        Returns the file content and keywords.
         """
         file_info = self.detect_file_type(file_path)
         logger.info(f"Processing {file_path.name} detected as {file_info['category']}")
@@ -314,7 +309,6 @@ class SecureFileClient:
         # For text files, extract keywords directly
         if file_info['category'] == "text":
             try:
-                logger.debug(f"Processing text file: {file_path.name}")
                 text_content = raw_content.decode('utf-8', errors='ignore')
                 keywords = self.extract_keywords(text_content, file_path)
                 return raw_content, keywords
@@ -352,11 +346,10 @@ class SecureFileClient:
 
     def split_into_blocks(self, content: bytes) -> List[bytes]:
         """Split file content into fixed-size blocks."""
-        logger.info(f"Splitting content into blocks (size: {len(content)} bytes)")
-        blocks = []
         total_size = len(content)
         num_blocks = math.ceil(total_size / self.block_size)
         
+        blocks = []
         for i in range(num_blocks):
             start = i * self.block_size
             end = min(start + self.block_size, total_size)
@@ -364,36 +357,93 @@ class SecureFileClient:
             if len(block) < self.block_size:
                 block = block + b'\0' * (self.block_size - len(block))
             blocks.append(block)
-            
+        
         logger.info(f"Split content into {len(blocks)} blocks of {self.block_size} bytes")
         return blocks
+
+    def _process_blocks(self, blocks: List[bytes], alpha: int, key: bytes, start_idx: int = 0) -> List[Dict]:
+        """Process blocks and generate tags."""
+        block_data = []
+        for i, block in enumerate(blocks):
+            block_idx = start_idx + i
+            tag = self.compute_tag(block, block_idx, alpha, key)
+            block_data.append({
+                "block_idx": block_idx,
+                "tag": tag.to_bytes(32, 'big').hex(),
+                "size": len(block)
+            })
+        return block_data
+    
+    def _upload_single_block(self, file_id: str, block: bytes, block_idx: int) -> bool:
+        """Upload a single block to the server."""
+        files = {"block": (f"{file_id}_block_{block_idx}", block, "application/octet-stream")}
+        data = {"file_id": file_id, "block_idx": block_idx}
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
+                if response.status_code == 200:
+                    return True
+                time.sleep(1)  # Wait before retrying
+            except requests.exceptions.RequestException:
+                time.sleep(1)  # Wait before retrying
+                
+        return False
+    
+    def _upload_blocks_multithreaded(self, file_id: str, blocks: List[bytes], start_idx: int = 0):
+        """Upload blocks to the server using multithreading."""
+        logger.info(f"Uploading {len(blocks)} blocks using multithreading")
+        
+        # Submit all uploads to thread pool
+        futures = []
+        for i, block in enumerate(blocks):
+            block_idx = start_idx + i
+            future = self.thread_pool.submit(self._upload_single_block, file_id, block, block_idx)
+            futures.append((future, block_idx))
+        
+        # Track progress
+        total = len(blocks)
+        completed = 0
+        failed = []
+        
+        # Wait for all uploads to complete
+        for future, block_idx in futures:
+            try:
+                success = future.result()
+                completed += 1
+                if not success:
+                    failed.append(block_idx)
+            except Exception:
+                failed.append(block_idx)
+        
+        if failed:
+            raise Exception(f"Failed to upload {len(failed)} blocks: {failed}")
+        
+        logger.info(f"Successfully uploaded all {len(blocks)} blocks")
 
     def upload_file(self, file_path: Path, manual_keywords: List[str] = None) -> str:
         """
         Upload a file with Shacham-Waters tags.
-        All files are split into blocks regardless of file type.
         
         Args:
             file_path: Path to the file
             manual_keywords: Optional list of manual keywords
         """
-        logger.info(f"Uploading file: {file_path}")
+        logger.info(f"Starting upload for file: {file_path}")
+        file_id = str(uuid.uuid4())
+        
         try:
-            file_id = str(uuid.uuid4())
+            # Step 1: Read the file content and extract keywords
+            content, auto_keywords = self.get_content_and_keywords(file_path)
+            keywords = list(set((manual_keywords or []) + auto_keywords))            
+            # Step 2: Generate file metadata
             file_info = self.detect_file_type(file_path)
-            file_size = file_path.stat().st_size
-            
-            # Generate new key and alpha for this file
+            file_size = len(content)
             file_key = os.urandom(32)
             file_alpha = randint(1, self.p - 1)
             
-            # Get content and auto-extracted keywords
-            content, auto_keywords = self.get_content_and_keywords(file_path)
-            
-            # Use manual keywords if provided, otherwise use auto-extracted
-            keywords = manual_keywords if manual_keywords else auto_keywords
-            
-            # Store parameters for this file
+            # Step 3: Store client-side file parameters
             self.file_params[file_id] = {
                 'alpha': file_alpha,
                 'key': file_key,
@@ -403,155 +453,40 @@ class SecureFileClient:
                 'upload_date': datetime.now().isoformat()
             }
             self._save_storage()
-
-            # Process blocks & tags - All files are now split into blocks
-            if file_size <= 10 * 1024 * 1024:  # 10MB threshold for small files
-                blocks = self.split_into_blocks(content)
-                block_data = self._process_blocks(blocks, file_alpha, file_key)
-                
-                # Create metadata
-                metadata = {
-                    "file_id": file_id,
-                    "filename": file_path.name,
-                    "file_type": file_info['mime_type'],
-                    "file_category": file_info['category'],
-                    "file_size": file_size,
-                    "keywords": keywords,
-                    "total_blocks": len(blocks),
-                    "blocks": block_data
-                }
-                
-                # Send metadata to server
-                response = requests.post(f"{self.server_url}/create-file", json=metadata)
-                if response.status_code != 200:
-                    raise Exception(f"Server error: {response.text}")
-                
-                # Upload blocks using multithreading
-                self._upload_blocks_multithreaded(file_id, blocks)
-            else:
-                # For large files, process in chunks
-                logger.info(f"Large file detected ({file_size} bytes). Processing in chunks...")
-                
-                # Calculate total blocks
-                total_blocks = math.ceil(file_size / self.block_size)
-                
-                # Create metadata with placeholder for block data
-                metadata = {
-                    "file_id": file_id,
-                    "filename": file_path.name,
-                    "file_type": file_info['mime_type'],
-                    "file_category": file_info['category'],
-                    "file_size": file_size,
-                    "keywords": keywords,
-                    "total_blocks": total_blocks,
-                    "chunked_upload": True
-                }
-                
-                # Send metadata to server
-                response = requests.post(f"{self.server_url}/create-file", json=metadata)
-                if response.status_code != 200:
-                    raise Exception(f"Server error: {response.text}")
-                
-                # Process and upload blocks in chunks
-                with open(file_path, "rb") as f:
-                    chunk_size = 5 * 1024 * 1024  # 5MB chunks
-                    block_idx = 0
-                    
-                    while True:
-                        chunk = f.read(chunk_size)
-                        if not chunk:
-                            break
-                            
-                        blocks = self.split_into_blocks(chunk)
-                        block_data = self._process_blocks(blocks, file_alpha, file_key, start_idx=block_idx)
-                        
-                        # Update server with block metadata for this chunk
-                        response = requests.post(f"{self.server_url}/update-file-blocks", json={
-                            "file_id": file_id,
-                            "blocks": block_data
-                        })
-                        if response.status_code != 200:
-                            raise Exception(f"Server error updating blocks: {response.text}")
-                        
-                        # Upload blocks using multithreading
-                        self._upload_blocks_multithreaded(file_id, blocks, start_idx=block_idx)
-                        
-                        block_idx += len(blocks)
-                        logger.info(f"Uploaded chunk: {block_idx}/{total_blocks} blocks processed")
-
+            
+            # Step 4: Split content into blocks
+            blocks = self.split_into_blocks(content)
+            total_blocks = len(blocks)
+            
+            # Step 5: Process blocks to generate tags
+            block_data = self._process_blocks(blocks, file_alpha, file_key)
+            
+            # Step 6: Create file metadata on server
+            metadata = {
+                "file_id": file_id,
+                "filename": file_path.name,
+                "file_type": file_info['mime_type'],
+                "file_category": file_info['category'],
+                "file_size": file_size,
+                "keywords": keywords,
+                "total_blocks": total_blocks,
+                "blocks": block_data
+            }
+            
+            logger.info(f"Sending metadata for file {file_path.name} ({file_size} bytes, {total_blocks} blocks)")
+            response = requests.post(f"{self.server_url}/create-file", json=metadata)
+            if response.status_code != 200:
+                raise Exception(f"Server error: {response.text}")
+            
+            # Step 7: Upload blocks using multithreading
+            self._upload_blocks_multithreaded(file_id, blocks)
+            
             logger.info(f"Successfully uploaded file {file_path.name} with ID: {file_id}")
             return file_id
-
+            
         except Exception as e:
             logger.error(f"Upload failed: {str(e)}")
             raise
-
-    def _process_blocks(self, blocks: List[bytes], alpha: int, key: bytes, start_idx: int = 0) -> List[Dict]:
-        """Process blocks and generate tags."""
-        logger.debug(f"Processing {len(blocks)} blocks starting at index {start_idx}")
-        block_data = []
-        for i, block in enumerate(blocks):
-            block_idx = start_idx + i
-            tag = self.compute_tag(block, block_idx, alpha, key)
-            block_data.append({
-                "block_idx": block_idx,
-                "tag": tag.to_bytes(32, 'big').hex(),  # Store as hex string
-                "size": len(block)
-            })
-        return block_data
-    
-    def _upload_single_block(self, file_id: str, block: bytes, block_idx: int) -> bool:
-        """Upload a single block to the server. Used by the multithreaded uploader."""
-        logger.debug(f"Uploading block {block_idx} for file {file_id}")
-        files = {"block": (f"{file_id}_block_{block_idx}", block, "application/octet-stream")}
-        data = {"file_id": file_id, "block_idx": block_idx}
-        
-        # Retry logic for network issues
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
-                if response.status_code == 200:
-                    logger.debug(f"Successfully uploaded block {block_idx} for file {file_id}")
-                    return True
-                logger.warning(f"Error uploading block {block_idx}, attempt {attempt+1}/{max_retries}: {response.text}")
-                time.sleep(1)  # Wait before retrying
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Network error uploading block {block_idx}, attempt {attempt+1}/{max_retries}: {str(e)}")
-                time.sleep(1)  # Wait before retrying
-                
-        logger.error(f"Failed to upload block {block_idx} for file {file_id} after {max_retries} attempts")
-        return False
-    
-    def _upload_blocks_multithreaded(self, file_id: str, blocks: List[bytes], start_idx: int = 0):
-        """Upload blocks to the server using multithreading."""
-        logger.info(f"Starting multithreaded upload of {len(blocks)} blocks for file {file_id}")
-        futures = []
-        
-        # Submit all block uploads to the thread pool
-        for i, block in enumerate(blocks):
-            block_idx = start_idx + i
-            future = self.thread_pool.submit(self._upload_single_block, file_id, block, block_idx)
-            futures.append((future, block_idx))
-        
-        # Wait for all uploads to complete
-        failed_blocks = []
-        for future, block_idx in futures:
-            try:
-                success = future.result()
-                if not success:
-                    failed_blocks.append(block_idx)
-            except Exception as e:
-                logger.error(f"Exception in thread for block {block_idx}: {str(e)}")
-                failed_blocks.append(block_idx)
-        
-        # Report any failures
-        if failed_blocks:
-            failed_count = len(failed_blocks)
-            logger.error(f"Failed to upload {failed_count} blocks for file {file_id}: {failed_blocks}")
-            raise Exception(f"Failed to upload {failed_count} blocks. See logs for details.")
-        
-        logger.info(f"Successfully uploaded all {len(blocks)} blocks for file {file_id}")
 
     def parse_audit_request(self, audit_spec: str) -> Dict[str, List[int]]:
         """
@@ -859,8 +794,7 @@ class SecureFileClient:
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
                 
-            file_info = response.json()
-            logger.debug(f"Received file info: {file_info}")            
+            file_info = response.json()           
             return file_info
         except Exception as e:
             logger.error(f"Error getting file info: {str(e)}")

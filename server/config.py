@@ -17,7 +17,7 @@ AWS_CONFIG = {
 
 P = 2**256 - 189
 
-BLOCK_SIZE = 1024 * 1024
+BLOCK_SIZE = 1024 * 1024 * 10  # 10 MB
 
 # Logging configuration
 LOG_FILE = LOG_DIR / 'app.log'

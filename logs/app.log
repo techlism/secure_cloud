@@ -1,7 +1,0 @@
-2024-11-11 17:35:23,301 - INFO - Found credentials in shared credentials file: ~/.aws/credentials
-2024-11-11 17:35:23,364 - ERROR - Form data requires "python-multipart" to be installed. 
-You can install "python-multipart" with: 
-
-pip install python-multipart
-
-2024-11-11 17:35:40,248 - INFO - Found credentials in shared credentials file: ~/.aws/credentials
