@@ -32,3 +32,40 @@
 2025-05-01 18:52:54,082 - SecureFileClient - INFO - Successfully uploaded non-text file image.png with ID: 7f75e02e-a60d-4119-9d77-e6707e804e4c
 2025-05-01 18:53:19,478 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
 2025-05-01 18:53:19,479 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 06:30:06,318 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 06:30:06,319 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 06:34:06,881 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 06:34:06,882 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 06:40:26,361 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 06:40:26,361 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 06:40:29,988 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 06:40:29,990 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 06:40:30,144 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-02 06:59:12,750 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 06:59:12,751 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 06:59:17,543 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 06:59:17,543 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 06:59:17,705 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-02 07:01:41,637 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 07:01:41,637 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 07:01:47,310 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 07:01:47,311 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 07:01:47,385 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-02 07:07:53,095 - SecureFileClient - INFO - Successfully uploaded non-text file output_480p.mkv with ID: a195a29f-d856-4830-a29f-1e454039e98b
+2025-05-02 07:08:33,130 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 07:08:33,130 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 07:09:31,566 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 07:09:31,566 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 07:09:34,781 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 07:09:34,781 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 07:09:34,838 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-02 07:12:29,135 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 07:12:29,135 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 07:12:32,329 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 07:12:32,329 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 07:12:32,380 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-02 07:16:58,155 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-02 07:16:58,155 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-02 07:17:02,590 - SecureFileClient - INFO - Uploading file: output_480p.mkv
+2025-05-02 07:17:02,591 - SecureFileClient - INFO - Processing non-text file: output_480p.mkv
+2025-05-02 07:17:02,654 - SecureFileClient - INFO - Processing output_480p.mkv detected as video

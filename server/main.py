@@ -1,4 +1,3 @@
-#server.py
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Depends, Query
 from fastapi.responses import JSONResponse
 import boto3
@@ -44,7 +43,8 @@ async def create_file(metadata: Dict[str, Any]):
         filename = metadata["filename"]
         keywords = metadata["keywords"]
         total_blocks = metadata["total_blocks"]
-        blocks = metadata["blocks"]
+        blocks = metadata.get("blocks", [])
+        chunked_upload = metadata.get("chunked_upload", False)
 
         with get_db_connection() as conn:
             cursor = conn.cursor()
@@ -59,6 +59,35 @@ async def create_file(metadata: Dict[str, Any]):
                     VALUES (?, ?)
                 ''', (file_id, keyword))
 
+            if not chunked_upload and blocks:
+                for block in blocks:
+                    cursor.execute('''
+                        INSERT INTO blocks (file_id, block_idx, tag, block_size, s3_key)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (
+                        file_id,
+                        block["block_idx"],
+                        block["tag"],
+                        block["size"],
+                        f"blocks/{file_id}/{block['block_idx']}"
+                    ))
+            conn.commit()
+
+        return {"status": "success", "file_id": file_id}
+
+    except Exception as e:
+        logging.error(f"Error creating file record: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/update-file-blocks")
+async def update_file_blocks(block_data: Dict[str, Any]):
+    """Update file blocks for chunked uploads."""
+    try:
+        file_id = block_data["file_id"]
+        blocks = block_data["blocks"]
+        
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
             for block in blocks:
                 cursor.execute('''
                     INSERT INTO blocks (file_id, block_idx, tag, block_size, s3_key)
@@ -71,11 +100,11 @@ async def create_file(metadata: Dict[str, Any]):
                     f"blocks/{file_id}/{block['block_idx']}"
                 ))
             conn.commit()
-
+        
         return {"status": "success", "file_id": file_id}
-
+        
     except Exception as e:
-        logging.error(f"Error creating file record: {str(e)}")
+        logging.error(f"Error updating file blocks: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/upload-block")
@@ -173,6 +202,14 @@ async def generate_por_proof(request: Dict[str, Any]):
         if not challenge_dict:
             raise HTTPException(status_code=400, detail="Challenge contains no blocks")
 
+        # Verify all requested files exist
+        for file_id in file_ids:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT file_id FROM files WHERE file_id = ?', (file_id,))
+                if not cursor.fetchone():
+                    raise HTTPException(status_code=404, detail=f"File not found: {file_id}")
+
         # Aggregate sigma and mu across all files
         sigma = 0
         mu_dict = {file_id: 0 for file_id in file_ids}
@@ -182,6 +219,10 @@ async def generate_por_proof(request: Dict[str, Any]):
                 continue  # Skip files with no challenged blocks
 
             block_indices = list(challenge_dict[file_id].keys())
+            if not block_indices:
+                logging.warning(f"No block indices specified for file {file_id}")
+                continue
+                
             placeholders = ",".join(["?" for _ in block_indices])
 
             # Query blocks for this file
@@ -197,10 +238,16 @@ async def generate_por_proof(request: Dict[str, Any]):
 
             if not blocks_data:
                 logging.warning(f"No blocks found for file {file_id} with indices {block_indices}")
-                continue
+                raise HTTPException(status_code=404, detail=f"Requested blocks not found for file {file_id}")
 
             found_blocks = {block_idx: (s3_key, tag_hex, block_size) 
                            for block_idx, s3_key, tag_hex, block_size in blocks_data}
+                           
+            # Verify all requested blocks were found
+            missing_blocks = set(block_indices) - set(found_blocks.keys())
+            if missing_blocks:
+                logging.warning(f"Missing blocks for file {file_id}: {missing_blocks}")
+                raise HTTPException(status_code=404, detail=f"Blocks not found for file {file_id}: {missing_blocks}")
 
             for block_idx, (s3_key, tag_hex, _) in found_blocks.items():
                 coeff = challenge_dict[file_id][block_idx]
@@ -214,7 +261,7 @@ async def generate_por_proof(request: Dict[str, Any]):
                     block_content = response['Body'].read()
                 except Exception as e:
                     logging.error(f"Error retrieving block {block_idx} from S3 for file {file_id}: {str(e)}")
-                    continue
+                    raise HTTPException(status_code=500, detail=f"Failed to retrieve block {block_idx} for file {file_id}")
 
                 # Contribution to mu
                 m = int.from_bytes(block_content, 'big') % p
@@ -230,6 +277,150 @@ async def generate_por_proof(request: Dict[str, Any]):
             "mu": {file_id: mu.to_bytes(32, 'big').hex() for file_id, mu in mu_dict.items()}
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logging.error(f"Error generating PoR proof: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/list-files")
+async def list_files():
+    """List all files stored in the system."""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT f.file_id, f.filename, f.total_blocks, f.timestamp, SUM(b.block_size) as file_size
+                FROM files f
+                LEFT JOIN blocks b ON f.file_id = b.file_id
+                GROUP BY f.file_id
+            ''')
+            files_data = cursor.fetchall()
+            
+            files = []
+            for file_id, filename, total_blocks, timestamp, file_size in files_data:
+                # Get keywords for this file
+                cursor.execute('SELECT keyword FROM keywords WHERE file_id = ?', (file_id,))
+                keywords = [row[0] for row in cursor.fetchall()]
+                
+                files.append({
+                    "file_id": file_id,
+                    "filename": filename,
+                    "total_blocks": total_blocks,
+                    "file_size": file_size or 0,
+                    "keywords": keywords,
+                    "timestamp": timestamp
+                })
+                
+            return files
+            
+    except Exception as e:
+        logging.error(f"Error listing files: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/search")
+async def search_files(keywords: str = Query(...)):
+    """Search files by keywords."""
+    try:
+        search_terms = keywords.split(",")
+        if not search_terms:
+            return []
+            
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Build query to find files matching any of the keywords
+            query_placeholders = ",".join("?" for _ in search_terms)
+            cursor.execute(f'''
+                SELECT f.file_id, f.filename, f.total_blocks, f.timestamp, COUNT(k.keyword) as match_count
+                FROM files f
+                JOIN keywords k ON f.file_id = k.file_id
+                WHERE k.keyword IN ({query_placeholders})
+                GROUP BY f.file_id
+                ORDER BY match_count DESC
+            ''', search_terms)
+            
+            files_data = cursor.fetchall()
+            
+            results = []
+            for file_id, filename, total_blocks, timestamp, match_count in files_data:
+                # Get all keywords for this file
+                cursor.execute('SELECT keyword FROM keywords WHERE file_id = ?', (file_id,))
+                keywords = [row[0] for row in cursor.fetchall()]
+                
+                # Get file size
+                cursor.execute('SELECT SUM(block_size) FROM blocks WHERE file_id = ?', (file_id,))
+                size_result = cursor.fetchone()
+                file_size = size_result[0] if size_result and size_result[0] is not None else 0
+                
+                # Calculate match score as percentage of keywords matched
+                match_score = match_count / len(search_terms) if search_terms else 0
+                
+                results.append({
+                    "file_id": file_id,
+                    "filename": filename,
+                    "total_blocks": total_blocks,
+                    "file_size": file_size,
+                    "keywords": keywords,
+                    "timestamp": timestamp,
+                    "match_score": match_score
+                })
+                
+            return results
+            
+    except Exception as e:
+        logging.error(f"Error searching files: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/download")
+async def download_file(file_id: str = Query(...)):
+    """Download a complete file by reassembling its blocks."""
+    try:
+        # Get file info
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT filename FROM files WHERE file_id = ?', (file_id,))
+            result = cursor.fetchone()
+            
+            if not result:
+                raise HTTPException(status_code=404, detail="File not found")
+                
+            filename = result[0]
+            
+            # Get ordered blocks
+            cursor.execute('''
+                SELECT block_idx, s3_key
+                FROM blocks
+                WHERE file_id = ?
+                ORDER BY block_idx
+            ''', (file_id,))
+            
+            blocks_data = cursor.fetchall()
+            
+        if not blocks_data:
+            raise HTTPException(status_code=404, detail="No blocks found for this file")
+            
+        # Stream response using generator
+        async def file_generator():
+            for _, s3_key in blocks_data:
+                try:
+                    response = s3_client.get_object(
+                        Bucket=config.AWS_CONFIG['bucket_name'],
+                        Key=s3_key
+                    )
+                    yield response['Body'].read()
+                except Exception as e:
+                    logging.error(f"Error retrieving block with key {s3_key}: {str(e)}")
+                    raise HTTPException(status_code=500, detail="Failed to retrieve file block")
+
+        return JSONResponse(
+            content={"filename": filename},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+            media_type="application/octet-stream"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error downloading file: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))

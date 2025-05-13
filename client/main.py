@@ -1,7 +1,6 @@
-import json
 import math
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Union, Any
+from typing import List, Dict, Optional, Tuple, Any
 import requests
 import uuid
 import os
@@ -13,9 +12,10 @@ import mimetypes
 import re
 import subprocess
 import tempfile
-import shutil
 import logging
 from datetime import datetime
+import concurrent.futures
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -78,6 +78,9 @@ class SecureFileClient:
         
         # Store parameters for each file
         self._init_storage()
+        
+        # Thread pool for concurrent uploads
+        self.thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
 
     def _init_storage(self):
         """Initialize storage for file parameters."""
@@ -168,6 +171,7 @@ class SecureFileClient:
 
     def extract_text_from_video(self, file_path: Path) -> str:
         """Extract subtitles/captions from video files using ffmpeg."""
+        logger.info(f"Attempting to extract subtitles from video: {file_path.name}")
         if not FFMPEG_AVAILABLE:
             logger.warning("ffmpeg-python not available. Cannot extract subtitles.")
             return ""
@@ -177,65 +181,109 @@ class SecureFileClient:
             with tempfile.TemporaryDirectory() as temp_dir:
                 subtitle_path = os.path.join(temp_dir, "subtitles.srt")
                 
-                # Try to extract subtitles using ffmpeg
+                # Try to extract subtitles from all available subtitle streams
+                subtitle_content = ""
                 try:
+                    # First try with subtitle streams
+                    logger.debug(f"Attempting to extract subtitle streams from {file_path.name}")
                     (
                         ffmpeg
                         .input(str(file_path))
-                        .output(subtitle_path, map="s")  # Map subtitles
+                        .output(subtitle_path, map="s")  # Map all subtitle streams
                         .run(quiet=True, overwrite_output=True)
                     )
+                    
+                    if os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0:
+                        with open(subtitle_path, 'r', errors='ignore') as f:
+                            subtitle_content = f.read()
+                        logger.info(f"Successfully extracted subtitle stream from {file_path.name}")
                 except ffmpeg.Error:
-                    logger.info(f"No embedded subtitles found in {file_path.name}")
-                    return ""
+                    logger.debug(f"No subtitle stream found in {file_path.name}, trying individual streams")
+                    # If no embedded subtitles found, try extracting text from different streams
+                    for i in range(5):  # Try the first 5 potential subtitle streams
+                        try:
+                            stream_path = os.path.join(temp_dir, f"sub_{i}.srt")
+                            (
+                                ffmpeg
+                                .input(str(file_path))
+                                .output(stream_path, map=f"0:{i}")  # Try different stream indexes
+                                .run(quiet=True, overwrite_output=True)
+                            )
+                            
+                            if os.path.exists(stream_path) and os.path.getsize(stream_path) > 0:
+                                with open(stream_path, 'r', errors='ignore') as f:
+                                    subtitle_content = f.read()
+                                logger.info(f"Successfully extracted subtitle from stream {i} of {file_path.name}")
+                                break
+                        except ffmpeg.Error:
+                            logger.debug(f"No subtitles in stream {i} of {file_path.name}")
+                            continue
                 
-                # Read the subtitles if they were extracted
-                if os.path.exists(subtitle_path) and os.path.getsize(subtitle_path) > 0:
-                    with open(subtitle_path, 'r', errors='ignore') as f:
-                        content = f.read()
-                    
-                    # Clean up subtitle content (remove timestamps and numbers)
-                    clean_content = re.sub(r'\d+:\d+:\d+,\d+ --> \d+:\d+:\d+,\d+', '', content)
-                    clean_content = re.sub(r'^\d+$', '', clean_content, flags=re.MULTILINE)
-                    
-                    return clean_content
-                else:
-                    # If no subtitles, try speech recognition (placeholder - would require additional dependencies)
+                if not subtitle_content:
                     logger.info(f"No subtitles extracted from {file_path.name}")
                     return ""
+                
+                # Clean up subtitle content - strip all HTML tags and clean formatting
+                # Strip all HTML/XML tags
+                clean_content = re.sub(r'<[^>]*>', '', subtitle_content)
+                
+                # Remove timestamps and numbers
+                clean_content = re.sub(r'\d+:\d+:\d+[,\.]\d+ --> \d+:\d+:\d+[,\.]\d+', '', clean_content)
+                clean_content = re.sub(r'^\d+$', '', clean_content, flags=re.MULTILINE)
+                
+                # Remove special subtitle indicators like italics markup
+                clean_content = re.sub(r'\\[Nh]', '', clean_content)  # WebVTT formatting
+                clean_content = re.sub(r'\{[^\}]*\}', '', clean_content)  # SSA/ASS formatting
+                
+                # Remove excessive blank lines
+                clean_content = re.sub(r'\n+', '\n', clean_content)
+
+                logger.info(f"Extracted and cleaned {len(clean_content)} characters of subtitles from {file_path.name}")
+                return clean_content.strip()
+                
         except Exception as e:
             logger.error(f"Error extracting text from video {file_path.name}: {str(e)}")
             return ""
 
     def process_document_with_docling(self, file_path: Path) -> str:
         """Process document with Docling and extract text content."""
+        logger.info(f"Processing document with Docling: {file_path.name}")
         if not DOCLING_AVAILABLE:
             logger.warning("Docling not available. Cannot process document.")
             return ""
             
         try:
             result = self.doc_converter.convert(str(file_path))
-            return result.document.export_to_markdown()
+            text_content = result.document.export_to_text()
+            logger.info(f"Successfully extracted {len(text_content)} characters from {file_path.name}")
+            return text_content
         except Exception as e:
             logger.error(f"Error processing document with Docling: {str(e)}")
             return ""
 
     def extract_keywords(self, content: str, file_path: Path) -> List[str]:
         """Extract keywords from content using KeyBERT or fallback methods."""
+        logger.info(f"Extracting keywords from content for {file_path.name}")
+        
         if not content.strip():
             logger.info(f"No content to extract keywords from for {file_path.name}")
-            return self.extract_keywords_from_filename(file_path.name)
+            keywords = self.extract_keywords_from_filename(file_path.name)
+            logger.info(f"Extracted {len(keywords)} keywords from filename: {keywords}")
+            return keywords
             
         if KEYBERT_AVAILABLE:
             try:
+                logger.debug(f"Using KeyBERT to extract keywords from {file_path.name}")
                 keywords = self.kw_model.extract_keywords(content)
                 extracted_kw = [word for word, _ in keywords]
                 if extracted_kw:
+                    logger.info(f"KeyBERT extracted keywords: {extracted_kw}")
                     return extracted_kw
             except Exception as e:
                 logger.error(f"KeyBERT extraction error: {str(e)}")
         
         # Fallback: Basic keyword extraction from content
+        logger.debug(f"Using fallback keyword extraction for {file_path.name}")
         words = re.findall(r'\b\w+\b', content.lower())
         # Filter common words and short words
         stopwords = {'the', 'and', 'of', 'to', 'a', 'in', 'for', 'is', 'on', 'that', 'by', 'this', 'with', 'you', 'it'}
@@ -246,7 +294,9 @@ class SecureFileClient:
             word_counts[word] = word_counts.get(word, 0) + 1
         # Get top words
         sorted_words = sorted(word_counts.items(), key=lambda x: x[1], reverse=True)
-        return [word for word, count in sorted_words[:10]]  # Return top 10 words
+        extracted_keywords = [word for word, count in sorted_words[:10]]  # Return top 10 words
+        logger.info(f"Fallback method extracted keywords: {extracted_keywords}")
+        return extracted_keywords
 
     def get_content_and_keywords(self, file_path: Path) -> Tuple[Optional[bytes], List[str]]:
         """
@@ -259,10 +309,12 @@ class SecureFileClient:
         # Always read the raw content
         with open(file_path, "rb") as f:
             raw_content = f.read()
+            logger.info(f"Read {len(raw_content)} bytes from {file_path.name}")
         
         # For text files, extract keywords directly
         if file_info['category'] == "text":
             try:
+                logger.debug(f"Processing text file: {file_path.name}")
                 text_content = raw_content.decode('utf-8', errors='ignore')
                 keywords = self.extract_keywords(text_content, file_path)
                 return raw_content, keywords
@@ -295,6 +347,7 @@ class SecureFileClient:
         
         # Default fallback for binary files
         else:
+            logger.info(f"Processing binary file: {file_path.name}")
             return raw_content, self.extract_keywords_from_filename(file_path.name)
 
     def split_into_blocks(self, content: bytes) -> List[bytes]:
@@ -303,7 +356,7 @@ class SecureFileClient:
         blocks = []
         total_size = len(content)
         num_blocks = math.ceil(total_size / self.block_size)
-
+        
         for i in range(num_blocks):
             start = i * self.block_size
             end = min(start + self.block_size, total_size)
@@ -311,89 +364,18 @@ class SecureFileClient:
             if len(block) < self.block_size:
                 block = block + b'\0' * (self.block_size - len(block))
             blocks.append(block)
+            
+        logger.info(f"Split content into {len(blocks)} blocks of {self.block_size} bytes")
         return blocks
 
-    def handle_non_text_file(self, file_path: Path, file_id: str, file_key: bytes, file_alpha: int, manual_keywords: List[str] = None) -> str:
-        """
-        Special handling for non-text files that preserves file integrity.
-        Doesn't split the file into blocks, but calculates a single tag for verification.
-        """
-        logger.info(f"Processing non-text file: {file_path.name}")
-        try:
-            # Read full file content
-            with open(file_path, "rb") as f:
-                content = f.read()
-            
-            file_size = len(content)
-            
-            # Generate keywords
-            if manual_keywords:
-                keywords = manual_keywords
-            else:
-                _, auto_keywords = self.get_content_and_keywords(file_path)
-                keywords = auto_keywords
-            
-            # Calculate single tag for verification
-            # Use the entire file as a single block for tag calculation
-            tag = self.compute_tag(content, 0, file_alpha, file_key)
-            
-            # Store file information
-            file_info = self.detect_file_type(file_path)
-            self.file_params[file_id] = {
-                'alpha': file_alpha,
-                'key': file_key,
-                'filename': file_path.name,
-                'file_type': file_info['mime_type'],
-                'file_size': file_size,
-                'is_non_text': True  # Flag for non-text file
-            }
-            self._save_storage()
-            
-            # Create metadata for server
-            metadata = {
-                "file_id": file_id,
-                "filename": file_path.name,
-                "file_type": file_info['mime_type'],
-                "file_size": file_size,
-                "keywords": keywords,
-                "total_blocks": 1,  # Single block
-                "is_non_text": True,
-                "blocks": [{
-                    "block_idx": 0,
-                    "tag": tag.to_bytes(32, 'big').hex(),
-                    "size": file_size
-                }]
-            }
-            
-            # Send metadata to server
-            response = requests.post(f"{self.server_url}/create-file", json=metadata)
-            if response.status_code != 200:
-                raise Exception(f"Server error: {response.text}")
-            
-            # Upload file as a single block
-            files = {"block": (f"{file_id}_block_0", content, "application/octet-stream")}
-            data = {"file_id": file_id, "block_idx": 0, "is_non_text": True}
-            response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
-            
-            if response.status_code != 200:
-                raise Exception(f"Server error uploading file: {response.text}")
-            
-            logger.info(f"Successfully uploaded non-text file {file_path.name} with ID: {file_id}")
-            return file_id
-            
-        except Exception as e:
-            logger.error(f"Error handling non-text file: {str(e)}")
-            raise
-
-    def upload_file(self, file_path: Path, manual_keywords: List[str] = None, preserve_integrity: bool = True) -> str:
+    def upload_file(self, file_path: Path, manual_keywords: List[str] = None) -> str:
         """
         Upload a file with Shacham-Waters tags.
+        All files are split into blocks regardless of file type.
         
         Args:
             file_path: Path to the file
             manual_keywords: Optional list of manual keywords
-            preserve_integrity: If True, non-text files will be handled specially
-                                to preserve their integrity (default: True)
         """
         logger.info(f"Uploading file: {file_path}")
         try:
@@ -405,11 +387,6 @@ class SecureFileClient:
             file_key = os.urandom(32)
             file_alpha = randint(1, self.p - 1)
             
-            # For non-text files with preserve_integrity enabled, use special handling
-            if preserve_integrity and (file_info['category'] in ["document", "video", "binary"] or file_info['is_binary']):
-                return self.handle_non_text_file(file_path, file_id, file_key, file_alpha, manual_keywords)
-            
-            # For regular text files or when preserve_integrity is disabled
             # Get content and auto-extracted keywords
             content, auto_keywords = self.get_content_and_keywords(file_path)
             
@@ -422,11 +399,12 @@ class SecureFileClient:
                 'key': file_key,
                 'filename': file_path.name,
                 'file_type': file_info['mime_type'],
-                'file_size': file_size
+                'file_size': file_size,
+                'upload_date': datetime.now().isoformat()
             }
             self._save_storage()
 
-            # Process blocks & tags
+            # Process blocks & tags - All files are now split into blocks
             if file_size <= 10 * 1024 * 1024:  # 10MB threshold for small files
                 blocks = self.split_into_blocks(content)
                 block_data = self._process_blocks(blocks, file_alpha, file_key)
@@ -448,8 +426,8 @@ class SecureFileClient:
                 if response.status_code != 200:
                     raise Exception(f"Server error: {response.text}")
                 
-                # Upload blocks
-                self._upload_blocks(file_id, blocks)
+                # Upload blocks using multithreading
+                self._upload_blocks_multithreaded(file_id, blocks)
             else:
                 # For large files, process in chunks
                 logger.info(f"Large file detected ({file_size} bytes). Processing in chunks...")
@@ -495,8 +473,8 @@ class SecureFileClient:
                         if response.status_code != 200:
                             raise Exception(f"Server error updating blocks: {response.text}")
                         
-                        # Upload blocks
-                        self._upload_blocks(file_id, blocks, start_idx=block_idx)
+                        # Upload blocks using multithreading
+                        self._upload_blocks_multithreaded(file_id, blocks, start_idx=block_idx)
                         
                         block_idx += len(blocks)
                         logger.info(f"Uploaded chunk: {block_idx}/{total_blocks} blocks processed")
@@ -510,6 +488,7 @@ class SecureFileClient:
 
     def _process_blocks(self, blocks: List[bytes], alpha: int, key: bytes, start_idx: int = 0) -> List[Dict]:
         """Process blocks and generate tags."""
+        logger.debug(f"Processing {len(blocks)} blocks starting at index {start_idx}")
         block_data = []
         for i, block in enumerate(blocks):
             block_idx = start_idx + i
@@ -521,63 +500,222 @@ class SecureFileClient:
             })
         return block_data
     
-    def _upload_blocks(self, file_id: str, blocks: List[bytes], start_idx: int = 0):
-        """Upload blocks to the server."""
+    def _upload_single_block(self, file_id: str, block: bytes, block_idx: int) -> bool:
+        """Upload a single block to the server. Used by the multithreaded uploader."""
+        logger.debug(f"Uploading block {block_idx} for file {file_id}")
+        files = {"block": (f"{file_id}_block_{block_idx}", block, "application/octet-stream")}
+        data = {"file_id": file_id, "block_idx": block_idx}
+        
+        # Retry logic for network issues
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
+                if response.status_code == 200:
+                    logger.debug(f"Successfully uploaded block {block_idx} for file {file_id}")
+                    return True
+                logger.warning(f"Error uploading block {block_idx}, attempt {attempt+1}/{max_retries}: {response.text}")
+                time.sleep(1)  # Wait before retrying
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Network error uploading block {block_idx}, attempt {attempt+1}/{max_retries}: {str(e)}")
+                time.sleep(1)  # Wait before retrying
+                
+        logger.error(f"Failed to upload block {block_idx} for file {file_id} after {max_retries} attempts")
+        return False
+    
+    def _upload_blocks_multithreaded(self, file_id: str, blocks: List[bytes], start_idx: int = 0):
+        """Upload blocks to the server using multithreading."""
+        logger.info(f"Starting multithreaded upload of {len(blocks)} blocks for file {file_id}")
+        futures = []
+        
+        # Submit all block uploads to the thread pool
         for i, block in enumerate(blocks):
             block_idx = start_idx + i
-            files = {"block": (f"{file_id}_block_{block_idx}", block, "application/octet-stream")}
-            data = {"file_id": file_id, "block_idx": block_idx}
-            
-            # Retry logic for network issues
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    response = requests.post(f"{self.server_url}/upload-block", files=files, data=data)
-                    if response.status_code == 200:
-                        break
-                    logger.warning(f"Error uploading block {block_idx}, attempt {attempt+1}/{max_retries}")
-                    if attempt == max_retries - 1:
-                        raise Exception(f"Server error uploading block {block_idx}: {response.text}")
-                except requests.exceptions.RequestException as e:
-                    if attempt == max_retries - 1:
-                        raise Exception(f"Network error uploading block {block_idx}: {str(e)}")
+            future = self.thread_pool.submit(self._upload_single_block, file_id, block, block_idx)
+            futures.append((future, block_idx))
+        
+        # Wait for all uploads to complete
+        failed_blocks = []
+        for future, block_idx in futures:
+            try:
+                success = future.result()
+                if not success:
+                    failed_blocks.append(block_idx)
+            except Exception as e:
+                logger.error(f"Exception in thread for block {block_idx}: {str(e)}")
+                failed_blocks.append(block_idx)
+        
+        # Report any failures
+        if failed_blocks:
+            failed_count = len(failed_blocks)
+            logger.error(f"Failed to upload {failed_count} blocks for file {file_id}: {failed_blocks}")
+            raise Exception(f"Failed to upload {failed_count} blocks. See logs for details.")
+        
+        logger.info(f"Successfully uploaded all {len(blocks)} blocks for file {file_id}")
 
-    def generate_multi_file_por_challenge(self, file_ids: List[str]) -> Dict[str, List[Tuple[int, int]]]:
-        """Generate a PoR challenge across multiple files."""
+    def parse_audit_request(self, audit_spec: str) -> Dict[str, List[int]]:
+        """
+        Parse an audit specification string into a dictionary mapping file IDs to block indices.
+        Format: "file_id1 file_id2 ... 1,2,4"
+        The last element is a comma-separated list of block indices to audit for each file.
+        """
+        logger.info(f"Parsing audit request: {audit_spec}")
+        parts = audit_spec.strip().split()
+        if len(parts) < 2:
+            raise ValueError("Audit specification must include at least one file ID and block indices")
+            
+        # The last part should be the block indices
+        indices_str = parts[-1]
+        try:
+            indices = [int(idx) for idx in indices_str.split(',')]
+            if not indices:
+                raise ValueError("No block indices specified")
+        except ValueError:
+            # If the last part isn't valid indices, assume all parts are file IDs
+            # and use default indices (0)
+            indices = [0]
+            file_ids = parts
+            logger.info(f"No specific indices provided, defaulting to index 0 for all files")
+        else:
+            # Otherwise, all parts except the last are file IDs
+            file_ids = parts[:-1]
+            
+        logger.info(f"Parsed {len(file_ids)} file IDs and {len(indices)} block indices")
+        
+        # Create a mapping of file IDs to indices
+        audit_map = {file_id: indices for file_id in file_ids}
+        return audit_map
+
+    def validate_audit_request(self, audit_map: Dict[str, List[int]]) -> Dict[str, List[int]]:
+        """
+        Validate that all files exist and have the requested block indices.
+        Returns a map of valid file IDs to their valid block indices.
+        """
+        logger.info(f"Validating audit request for {len(audit_map)} files")
+        valid_map = {}
+        
+        for file_id, indices in audit_map.items():
+            try:
+                # Check if file exists and get its block count
+                file_info = self.get_file_info(file_id)
+                total_blocks = file_info.get("total_blocks", 0)
+                
+                if total_blocks == 0:
+                    logger.warning(f"File {file_id} has no blocks")
+                    continue
+                    
+                # Filter indices to only include valid ones
+                valid_indices = [idx for idx in indices if 0 <= idx < total_blocks]
+                
+                if not valid_indices:
+                    logger.warning(f"No valid block indices for file {file_id}. Requested: {indices}, Total blocks: {total_blocks}")
+                    continue
+                    
+                if len(valid_indices) < len(indices):
+                    missing = set(indices) - set(valid_indices)
+                    logger.warning(f"File {file_id} is missing requested blocks: {missing}")
+                    
+                valid_map[file_id] = valid_indices
+                logger.info(f"Validated file {file_id} with {len(valid_indices)} valid block indices")
+                
+            except Exception as e:
+                logger.error(f"Error validating file {file_id}: {str(e)}")
+                
+        if not valid_map:
+            raise ValueError("No valid file and block combinations found for auditing")
+            
+        return valid_map
+
+    def generate_audit_challenge(self, audit_map: Dict[str, List[int]]) -> Dict[str, List[Tuple[int, int]]]:
+        """
+        Generate a PoR challenge for specific files and specific block indices.
+        """
+        logger.info(f"Generating audit challenge for {len(audit_map)} files")
         challenge = {}
-        total_blocks_per_file = {}
-
-        # Fetch file info for each file
-        for file_id in file_ids:
-            response = requests.get(f"{self.server_url}/file-info?file_id={file_id}")
-            if response.status_code != 200:
-                raise Exception(f"Server error for file {file_id}: {response.text}")
+        
+        for file_id, block_indices in audit_map.items():
+            challenge[file_id] = [(idx, randint(1, self.p - 1)) for idx in block_indices]
+            logger.info(f"Generated challenge for file {file_id} with {len(block_indices)} blocks: {block_indices}")
             
-            file_info = response.json()
-            total_blocks_per_file[file_id] = file_info["total_blocks"]
-            
-            # Check if file is non-text (special handling)
-            is_non_text = file_info.get("is_non_text", False)
-            if is_non_text:
-                # For non-text files, challenge the entire file as one block
-                challenge[file_id] = [(0, randint(1, self.p - 1))]
-                logger.info(f"Challenging non-text file {file_id} (entire file as one block)")
-                continue
-
-            # Regular challenge generation for normal files
-            total_blocks = total_blocks_per_file[file_id]
-            l = min(self.l, total_blocks)  # Number of blocks to challenge per file
-            if total_blocks <= 8:
-                indices = list(range(total_blocks))
-            else:
-                indices = sample(range(total_blocks), l)
-            challenge[file_id] = [(i, randint(1, self.p - 1)) for i in indices]
-            logger.info(f"Challenging {len(indices)} blocks for file {file_id} out of {total_blocks}")
-
         return challenge
 
+    def run_audit(self, audit_spec: str) -> Dict[str, Any]:
+        """
+        Run an audit based on a specification string.
+        Format: "file_id1 file_id2 ... 1,2,4"
+        Returns audit results including verification status for each file.
+        """
+        logger.info(f"Starting audit with specification: {audit_spec}")
+        try:
+            # Parse the audit specification
+            audit_map = self.parse_audit_request(audit_spec)
+            
+            # Validate the audit request
+            valid_map = self.validate_audit_request(audit_map)
+            
+            if not valid_map:
+                return {"success": False, "message": "No valid files and blocks to audit"}
+                
+            # Generate challenge for valid files and blocks
+            file_challenges = self.generate_audit_challenge(valid_map)
+            
+            # Prepare challenge for server
+            challenge_json = [{"file_id": file_id, "index": i, "coeff": nu} 
+                             for file_id, challenges in file_challenges.items() 
+                             for i, nu in challenges]
+                             
+            # Send challenge to server
+            file_ids = list(valid_map.keys())
+            logger.info(f"Sending challenge to server for files: {file_ids}")
+            response = requests.post(f"{self.server_url}/por-proof", json={
+                "file_ids": file_ids,
+                "challenge": challenge_json
+            })
+            
+            if response.status_code != 200:
+                logger.error(f"Server error during audit: {response.text}")
+                return {"success": False, "message": f"Server error: {response.text}"}
+                
+            # Process server response
+            data = response.json()
+            sigma = int(data["sigma"], 16)
+            mu_dict = {file_id: int(mu_hex, 16) for file_id, mu_hex in data["mu"].items()}
+            
+            # Verify the proof
+            verified = self.verify_por_proof(file_challenges, sigma, mu_dict)
+            
+            # Calculate results per file
+            per_file_results = {}
+            for file_id in file_ids:
+                if file_id not in self.file_params:
+                    per_file_results[file_id] = {"verified": False, "error": "No local parameters found"}
+                    continue
+                    
+                # File specific verification would require more detailed data from server
+                # For now, we'll use the global verification result
+                per_file_results[file_id] = {"verified": verified, "blocks_audited": valid_map[file_id]}
+            
+            audit_result = {
+                "success": True,
+                "verified": verified,
+                "file_count": len(file_ids),
+                "block_count": sum(len(indices) for indices in valid_map.values()),
+                "file_results": per_file_results,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Audit completed with result: verified={verified}")
+            return audit_result
+            
+        except Exception as e:
+            logger.error(f"Error during audit: {str(e)}")
+            return {"success": False, "message": str(e)}
+
     def verify_por_proof(self, file_challenges: Dict[str, List[Tuple[int, int]]], sigma: int, mu_dict: Dict[str, int]) -> bool: 
+        """Verify a proof of retrievability across multiple files."""
+        logger.info(f"Verifying PoR proof for {len(file_challenges)} files")
         expected_sigma = 0
+        
         for file_id, challenge in file_challenges.items():
             if file_id not in self.file_params:
                 logger.error(f"Error: No parameters found for file {file_id}")
@@ -586,14 +724,20 @@ class SecureFileClient:
             file_params = self.file_params[file_id]
             alpha = file_params['alpha']
             key = file_params['key']
-
+            
+            logger.debug(f"Verifying file {file_id} with {len(challenge)} blocks")
             file_sigma_contribution = 0
             for i, nu in challenge:
                 prf_value = self.prf(i, key)
                 file_sigma_contribution = (file_sigma_contribution + nu * prf_value) % self.p
             
             expected_sigma = (expected_sigma + file_sigma_contribution) % self.p
-            expected_sigma = (expected_sigma + alpha * mu_dict[file_id]) % self.p
+            
+            if file_id in mu_dict:
+                expected_sigma = (expected_sigma + alpha * mu_dict[file_id]) % self.p
+            else:
+                logger.error(f"Missing mu value for file {file_id}")
+                return False
 
         logger.info(f"Expected sigma: {expected_sigma}")
         logger.info(f"Received sigma: {sigma}")
@@ -626,14 +770,44 @@ class SecureFileClient:
             logger.error(f"PoR proof failed: {str(e)}")
             raise
 
+    def generate_multi_file_por_challenge(self, file_ids: List[str]) -> Dict[str, List[Tuple[int, int]]]:
+        """Generate a PoR challenge across multiple files."""
+        logger.info(f"Generating multi-file PoR challenge for {len(file_ids)} files")
+        challenge = {}
+        total_blocks_per_file = {}
+
+        # Fetch file info for each file
+        for file_id in file_ids:
+            response = requests.get(f"{self.server_url}/file-info?file_id={file_id}")
+            if response.status_code != 200:
+                raise Exception(f"Server error for file {file_id}: {response.text}")
+            
+            file_info = response.json()
+            total_blocks_per_file[file_id] = file_info["total_blocks"]
+            logger.debug(f"File {file_id} has {total_blocks_per_file[file_id]} blocks")
+
+            # Regular challenge generation for all files
+            total_blocks = total_blocks_per_file[file_id]
+            l = min(self.l, total_blocks)  # Number of blocks to challenge per file
+            if total_blocks <= 8:
+                indices = list(range(total_blocks))
+            else:
+                indices = sample(range(total_blocks), l)
+            challenge[file_id] = [(i, randint(1, self.p - 1)) for i in indices]
+            logger.info(f"Challenging {len(indices)} blocks for file {file_id} out of {total_blocks}")
+
+        return challenge
+
     def list_files(self, verbose: bool = False) -> List[Dict]:
         """List all files stored on the server."""
         try:
+            logger.info("Listing files from server")
             response = requests.get(f"{self.server_url}/list-files")
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
                 
             file_list = response.json()
+            logger.info(f"Received {len(file_list)} files from server")
             
             # If verbose mode, add local info
             if verbose:
@@ -656,11 +830,13 @@ class SecureFileClient:
     def search_files(self, keywords: List[str]) -> List[Dict]:
         """Search for files by keywords."""
         try:
+            logger.info(f"Searching files with keywords: {keywords}")
             response = requests.get(f"{self.server_url}/search", params={"keywords": ",".join(keywords)})
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
                 
             search_results = response.json()
+            logger.info(f"Found {len(search_results)} files matching keywords")
             
             # Add local info for files we have stored
             for file in search_results:
@@ -678,25 +854,13 @@ class SecureFileClient:
     def get_file_info(self, file_id: str) -> Dict[str, Any]:
         """Get detailed information about a specific file."""
         try:
+            logger.info(f"Getting file info for {file_id}")
             response = requests.get(f"{self.server_url}/file-info", params={"file_id": file_id})
             if response.status_code != 200:
                 raise Exception(f"Server error: {response.text}")
                 
             file_info = response.json()
-            
-            # Add local information if available
-            if file_id in self.file_params:
-                local_info = {
-                    "stored_locally": True,
-                    "filename": self.file_params[file_id]['filename'],
-                    "file_type": self.file_params[file_id].get('file_type', 'Unknown'),
-                    "file_size": self.file_params[file_id].get('file_size', 0),
-                    "upload_date": self.file_params[file_id].get('upload_date', 'Unknown')
-                }
-                file_info["local_info"] = local_info
-            else:
-                file_info["local_info"] = {"stored_locally": False}
-                
+            logger.debug(f"Received file info: {file_info}")            
             return file_info
         except Exception as e:
             logger.error(f"Error getting file info: {str(e)}")
@@ -706,6 +870,7 @@ class SecureFileClient:
         """Download a file from the server."""
         try:
             # Get file info
+            logger.info(f"Downloading file {file_id}")
             file_info = self.get_file_info(file_id)
             filename = file_info.get("filename", f"downloaded_{file_id}")
             
@@ -721,11 +886,17 @@ class SecureFileClient:
                 raise Exception(f"Server error: {response.text}")
                 
             # Save file
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
             with open(output_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
+                    downloaded_size += len(chunk)
+                    if total_size > 0:
+                        progress = min(100, int(100 * downloaded_size / total_size))
+                        logger.debug(f"Download progress: {progress}% ({downloaded_size}/{total_size} bytes)")
                     
-            logger.info(f"Downloaded file {filename} to {output_path}")
+            logger.info(f"Downloaded file {filename} to {output_path} ({downloaded_size} bytes)")
             return output_path
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}")
@@ -770,7 +941,10 @@ def main():
     upload_parser = subparsers.add_parser("upload", help="Upload a file")
     upload_parser.add_argument("file", type=str, help="Path to the file")
     upload_parser.add_argument("--keywords", type=str, nargs='+', help="Optional manual keywords for the file")
-    upload_parser.add_argument("--split", action="store_true", help="Split even non-text files into blocks (not recommended)")
+
+    # Audit subcommand
+    audit_parser = subparsers.add_parser("audit", help="Audit specific files and blocks")
+    audit_parser.add_argument("spec", type=str, help="Audit specification in format 'file_id1 file_id2 ... 1,2,4'")
 
     # PoR subcommand
     por_parser = subparsers.add_parser("por", help="Request PoR proof for multiple files")
@@ -812,8 +986,7 @@ def main():
             # Process a single file
             file_id = client.upload_file(
                 path, 
-                manual_keywords=args.keywords, 
-                preserve_integrity=not args.split
+                manual_keywords=args.keywords
             )
             print(f"File uploaded with ID: {file_id}")
         elif path.is_dir():
@@ -824,8 +997,7 @@ def main():
                     try:
                         file_id = client.upload_file(
                             file_path, 
-                            manual_keywords=args.keywords,
-                            preserve_integrity=not args.split
+                            manual_keywords=args.keywords
                         )
                         uploaded_files.append((file_path.name, file_id))
                     except Exception as e:
@@ -837,6 +1009,32 @@ def main():
                 print(f"  - {filename}: {file_id}")
         else:
             print(f"Error: {args.file} is not a valid file or directory")
+            
+    elif args.command == "audit":
+        # Run an audit using the specified files and blocks
+        try:
+            result = client.run_audit(args.spec)
+            if result.get("success", False):
+                if result.get("verified", False):
+                    print(f"✅ Audit SUCCESSFUL for {result['file_count']} files ({result['block_count']} blocks)")
+                    for file_id, file_result in result["file_results"].items():
+                        blocks = file_result.get("blocks_audited", [])
+                        status = "✅ Verified" if file_result.get("verified", False) else "❌ Failed"
+                        print(f"  - {file_id}: {status} - Audited blocks: {blocks}")
+                else:
+                    print(f"❌ Audit FAILED for {result['file_count']} files ({result['block_count']} blocks)")
+                    for file_id, file_result in result["file_results"].items():
+                        blocks = file_result.get("blocks_audited", [])
+                        error = file_result.get("error", "Unknown error")
+                        if "error" in file_result:
+                            print(f"  - {file_id}: ERROR: {error}")
+                        else:
+                            status = "✅ Verified" if file_result.get("verified", False) else "❌ Failed"
+                            print(f"  - {file_id}: {status} - Audited blocks: {blocks}")
+            else:
+                print(f"❌ Audit failed: {result.get('message', 'Unknown error')}")
+        except Exception as e:
+            print(f"Error during audit: {str(e)}")
 
     elif args.command == "por":
         # Request PoR proof for files
@@ -908,21 +1106,19 @@ def main():
         # Get detailed file information
         try:
             file_info = client.get_file_info(args.file_id)
-            print(f"Information for file {args.file_id}:")
-            print(f"  Filename: {file_info.get('filename', 'Unknown')}")
-            print(f"  File Type: {file_info.get('file_type', 'Unknown')}")
-            print(f"  File Size: {file_info.get('file_size', 0) / 1024:.1f} KB")
-            print(f"  Keywords: {', '.join(file_info.get('keywords', []))}")
-            print(f"  Total Blocks: {file_info.get('total_blocks', 0)}")
-            print(f"  Category: {file_info.get('file_category', 'Unknown')}")
+            print(f"File ID: {args.file_id}")
+            print(f"Filename: {file_info.get('filename', 'Unknown')}")
+            print(f"Total blocks: {file_info.get('total_blocks', 0)}")
+            print(f"Size: {file_info.get('file_size', 0)} bytes")
+            print(f"Keywords: {', '.join(file_info.get('keywords', []))}")
+            print(f"Upload date: {file_info.get('upload_date', 'Unknown')}")
             
             # Show local information if available
-            if file_info.get("local_info", {}).get("stored_locally", False):
-                print("  Local Information:")
-                local_info = file_info["local_info"]
-                print(f"    Upload Date: {local_info.get('upload_date', 'Unknown')}")
-            else:
-                print("  Local Information: Not stored locally")
+            if args.file_id in client.file_params:
+                local_info = client.file_params[args.file_id]
+                print("Local information:")
+                print(f"  File type: {local_info.get('file_type', 'Unknown')}")
+                print(f"  Upload date: {local_info.get('upload_date', 'Unknown')}")
                 
         except Exception as e:
             print(f"Error getting file information: {str(e)}")
