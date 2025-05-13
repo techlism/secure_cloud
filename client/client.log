@@ -1,0 +1,119 @@
+2025-05-13 12:20:01,810 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 12:20:01,811 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 12:20:05,450 - SecureFileClient - INFO - Starting upload for file: output_480p.mkv
+2025-05-13 12:20:05,451 - SecureFileClient - INFO - Processing output_480p.mkv detected as video
+2025-05-13 12:20:05,569 - SecureFileClient - INFO - Read 169300839 bytes from output_480p.mkv
+2025-05-13 12:20:05,570 - SecureFileClient - INFO - Attempting to extract subtitles from video: output_480p.mkv
+2025-05-13 12:20:06,071 - SecureFileClient - INFO - Successfully extracted subtitle stream from output_480p.mkv
+2025-05-13 12:20:06,072 - SecureFileClient - INFO - Extracted and cleaned 20335 characters of subtitles from output_480p.mkv
+2025-05-13 12:20:06,073 - SecureFileClient - INFO - Extracting keywords from content for output_480p.mkv
+2025-05-13 12:20:06,573 - SecureFileClient - INFO - KeyBERT extracted keywords: ['horse', 'horses', 'punjabi', 'sindhi', 'manipuri']
+2025-05-13 12:20:06,630 - SecureFileClient - INFO - Split content into 17 blocks of 10485760 bytes
+2025-05-13 12:20:07,849 - SecureFileClient - INFO - Sending metadata for file output_480p.mkv (169300839 bytes, 17 blocks)
+2025-05-13 12:20:07,977 - SecureFileClient - INFO - Uploading 17 blocks using multithreading
+2025-05-13 12:21:20,882 - SecureFileClient - INFO - Successfully uploaded all 17 blocks
+2025-05-13 12:21:20,882 - SecureFileClient - INFO - Successfully uploaded file output_480p.mkv with ID: 2589202a-9439-4d52-8c72-d98100da7ecd
+2025-05-13 12:26:40,844 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 12:26:40,845 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 12:26:45,879 - SecureFileClient - INFO - Starting upload for file: 19mb.pdf
+2025-05-13 12:26:45,880 - SecureFileClient - INFO - Processing 19mb.pdf detected as document
+2025-05-13 12:26:45,895 - SecureFileClient - INFO - Read 19901641 bytes from 19mb.pdf
+2025-05-13 12:26:45,895 - SecureFileClient - INFO - Processing document with Docling: 19mb.pdf
+2025-05-13 12:26:46,009 - docling.document_converter - INFO - Going to convert document batch...
+2025-05-13 12:26:46,009 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 70041f74270850b7bedf7c8f5c2dcede
+2025-05-13 12:26:46,021 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:26:46,021 - docling.models.factories - INFO - Registered ocr engines: ['easyocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2025-05-13 12:26:46,144 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:26:47,851 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:26:49,648 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:26:50,144 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:26:50,144 - docling.models.factories - INFO - Registered picture descriptions: ['vlm', 'api']
+2025-05-13 12:26:50,145 - docling.pipeline.base_pipeline - INFO - Processing document 19mb.pdf
+2025-05-13 12:40:33,626 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 12:40:33,626 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 12:40:39,414 - SecureFileClient - INFO - Starting upload for file: 10mb.pdf
+2025-05-13 12:40:39,414 - SecureFileClient - INFO - Processing 10mb.pdf detected as document
+2025-05-13 12:40:39,417 - SecureFileClient - INFO - Read 10490314 bytes from 10mb.pdf
+2025-05-13 12:40:39,417 - SecureFileClient - INFO - Processing document with Docling: 10mb.pdf
+2025-05-13 12:40:39,489 - docling.document_converter - INFO - Going to convert document batch...
+2025-05-13 12:40:39,490 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 70041f74270850b7bedf7c8f5c2dcede
+2025-05-13 12:40:39,499 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:40:39,499 - docling.models.factories - INFO - Registered ocr engines: ['easyocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2025-05-13 12:40:39,585 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:40:41,099 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:40:42,174 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:40:42,614 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:40:42,615 - docling.models.factories - INFO - Registered picture descriptions: ['vlm', 'api']
+2025-05-13 12:40:42,615 - docling.pipeline.base_pipeline - INFO - Processing document 10mb.pdf
+2025-05-13 12:46:40,425 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 12:46:40,425 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 12:46:45,777 - SecureFileClient - INFO - Starting upload for file: 2mb.pdf
+2025-05-13 12:46:45,778 - SecureFileClient - INFO - Processing 2mb.pdf detected as document
+2025-05-13 12:46:45,778 - SecureFileClient - INFO - Read 2208728 bytes from 2mb.pdf
+2025-05-13 12:46:45,778 - SecureFileClient - INFO - Processing document with Docling: 2mb.pdf
+2025-05-13 12:46:45,790 - docling.document_converter - INFO - Going to convert document batch...
+2025-05-13 12:46:45,790 - docling.document_converter - INFO - Initializing pipeline for StandardPdfPipeline with options hash 70041f74270850b7bedf7c8f5c2dcede
+2025-05-13 12:46:45,799 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:46:45,801 - docling.models.factories - INFO - Registered ocr engines: ['easyocr', 'ocrmac', 'rapidocr', 'tesserocr', 'tesseract']
+2025-05-13 12:46:45,849 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:46:47,423 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:46:48,599 - docling.utils.accelerator_utils - INFO - Accelerator device: 'cpu'
+2025-05-13 12:46:48,968 - docling.models.factories.base_factory - INFO - Loading plugin 'docling_defaults'
+2025-05-13 12:46:48,968 - docling.models.factories - INFO - Registered picture descriptions: ['vlm', 'api']
+2025-05-13 12:46:48,968 - docling.pipeline.base_pipeline - INFO - Processing document 2mb.pdf
+2025-05-13 13:58:58,785 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 13:58:58,786 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 13:59:04,254 - SecureFileClient - INFO - Listing files from server
+2025-05-13 13:59:04,450 - SecureFileClient - INFO - Received 1 files from server
+2025-05-13 13:59:44,407 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 13:59:44,408 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 13:59:49,836 - SecureFileClient - INFO - Getting file info for 2589202a-9439-4d52-8c72-d98100da7ecd
+2025-05-13 14:05:29,921 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 14:05:29,921 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 14:05:33,340 - SecureFileClient - INFO - Starting upload for file: video_696MB.mkv
+2025-05-13 14:05:33,340 - SecureFileClient - INFO - Processing video_696MB.mkv detected as video
+2025-05-13 14:05:33,585 - SecureFileClient - INFO - Read 730386661 bytes from video_696MB.mkv
+2025-05-13 14:05:33,586 - SecureFileClient - INFO - Attempting to extract subtitles from video: video_696MB.mkv
+2025-05-13 14:05:34,095 - SecureFileClient - INFO - Successfully extracted subtitle stream from video_696MB.mkv
+2025-05-13 14:05:34,097 - SecureFileClient - INFO - Extracted and cleaned 20335 characters of subtitles from video_696MB.mkv
+2025-05-13 14:05:34,097 - SecureFileClient - INFO - Extracting keywords from content for video_696MB.mkv
+2025-05-13 14:05:34,648 - SecureFileClient - INFO - KeyBERT extracted keywords: ['horse', 'horses', 'punjabi', 'sindhi', 'manipuri']
+2025-05-13 14:05:34,914 - SecureFileClient - INFO - Split content into 70 blocks of 10485760 bytes
+2025-05-13 14:05:40,058 - SecureFileClient - INFO - Sending metadata for file video_696MB.mkv (730386661 bytes, 70 blocks)
+2025-05-13 14:05:40,243 - SecureFileClient - INFO - Uploading 70 blocks using multithreading
+2025-05-13 14:09:24,851 - SecureFileClient - INFO - Successfully uploaded all 70 blocks
+2025-05-13 14:09:24,852 - SecureFileClient - INFO - Successfully uploaded file video_696MB.mkv with ID: 7bb9e629-1292-4529-b880-d8cc71832eaa
+2025-05-13 14:10:33,796 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 14:10:33,796 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 14:10:38,206 - SecureFileClient - INFO - Listing files from server
+2025-05-13 14:10:38,330 - SecureFileClient - INFO - Received 2 files from server
+2025-05-13 14:39:49,940 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 14:39:49,941 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 14:39:54,595 - SecureFileClient - INFO - Starting audit for files with keyword: horse on blocks: [0, 1, 2, 3, 8, 12]
+2025-05-13 14:39:54,710 - SecureFileClient - INFO - Found 2 files with keyword 'horse'
+2025-05-13 14:39:59,521 - SecureFileClient - INFO - Verifying PoR proof for 2 files
+2025-05-13 14:39:59,522 - SecureFileClient - INFO - Expected sigma: 26673528367139421724390204114976051646390793733366709568378451652636758193771
+2025-05-13 14:39:59,522 - SecureFileClient - INFO - Received sigma: 26673528367139421724390204114976051646390793733366709568378451652636758193771
+2025-05-13 14:39:59,523 - SecureFileClient - INFO - Keyword audit completed with result: verified=True
+2025-05-13 14:40:57,257 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 14:40:57,257 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 14:41:00,754 - SecureFileClient - INFO - Listing files from server
+2025-05-13 14:41:00,875 - SecureFileClient - INFO - Received 2 files from server
+2025-05-13 14:46:54,438 - sentence_transformers.SentenceTransformer - INFO - Use pytorch device_name: cpu
+2025-05-13 14:46:54,439 - sentence_transformers.SentenceTransformer - INFO - Load pretrained SentenceTransformer: all-MiniLM-L6-v2
+2025-05-13 14:46:58,664 - SecureFileClient - INFO - Starting audit with specification: 2589202a-9439-4d52-8c72-d98100da7ecd 7bb9e629-1292-4529-b880-d8cc71832eaa 0,9,13,12,11
+2025-05-13 14:46:58,664 - SecureFileClient - INFO - Parsing audit request: 2589202a-9439-4d52-8c72-d98100da7ecd 7bb9e629-1292-4529-b880-d8cc71832eaa 0,9,13,12,11
+2025-05-13 14:46:58,664 - SecureFileClient - INFO - Parsed 2 file IDs and 5 block indices
+2025-05-13 14:46:58,664 - SecureFileClient - INFO - Validating audit request for 2 files
+2025-05-13 14:46:58,665 - SecureFileClient - INFO - Getting file info for 2589202a-9439-4d52-8c72-d98100da7ecd
+2025-05-13 14:46:58,774 - SecureFileClient - INFO - Validated file 2589202a-9439-4d52-8c72-d98100da7ecd with 5 valid block indices
+2025-05-13 14:46:58,775 - SecureFileClient - INFO - Getting file info for 7bb9e629-1292-4529-b880-d8cc71832eaa
+2025-05-13 14:46:58,914 - SecureFileClient - INFO - Validated file 7bb9e629-1292-4529-b880-d8cc71832eaa with 5 valid block indices
+2025-05-13 14:46:58,914 - SecureFileClient - INFO - Generating audit challenge for 2 files
+2025-05-13 14:46:58,914 - SecureFileClient - INFO - Generated challenge for file 2589202a-9439-4d52-8c72-d98100da7ecd with 5 blocks: [0, 9, 13, 12, 11]
+2025-05-13 14:46:58,914 - SecureFileClient - INFO - Generated challenge for file 7bb9e629-1292-4529-b880-d8cc71832eaa with 5 blocks: [0, 9, 13, 12, 11]
+2025-05-13 14:46:58,914 - SecureFileClient - INFO - Sending challenge to server for files: ['2589202a-9439-4d52-8c72-d98100da7ecd', '7bb9e629-1292-4529-b880-d8cc71832eaa']
+2025-05-13 14:47:02,680 - SecureFileClient - INFO - Verifying PoR proof for 2 files
+2025-05-13 14:47:02,681 - SecureFileClient - INFO - Expected sigma: 9658136875821608969853847620438980956017559140014540280839359121516728090916
+2025-05-13 14:47:02,681 - SecureFileClient - INFO - Received sigma: 9658136875821608969853847620438980956017559140014540280839359121516728090916
+2025-05-13 14:47:02,681 - SecureFileClient - INFO - Audit completed with result: verified=True

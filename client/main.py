@@ -1,5 +1,6 @@
 import math
 from pathlib import Path
+import sys
 from typing import List, Dict, Optional, Tuple, Any
 import requests
 import uuid
@@ -573,6 +574,80 @@ class SecureFileClient:
             logger.info(f"Generated challenge for file {file_id} with {len(block_indices)} blocks: {block_indices}")
             
         return challenge
+    
+    def audit_by_keyword(self, keyword: str, block_indices: List[int]) -> Dict[str, Any]:
+        """Run an audit on files containing a specific keyword."""
+        logger.info(f"Starting audit for files with keyword: {keyword} on blocks: {block_indices}")
+        try:
+            # Step 1: Find files containing this keyword
+            response = requests.get(f"{self.server_url}/search", params={"keywords": keyword})
+            if response.status_code != 200:
+                return {"success": False, "message": f"Search error: {response.text}"}
+                
+            search_results = response.json()
+            file_ids = [file["file_id"] for file in search_results]
+            
+            if not file_ids:
+                return {"success": False, "message": f"No files found with keyword: {keyword}"}
+                
+            logger.info(f"Found {len(file_ids)} files with keyword '{keyword}'")
+            
+            # Step 2: Generate challenge for each file
+            file_challenges = {}
+            challenge_items = []
+            
+            for file_id in file_ids:
+                file_challenges[file_id] = []
+                for block_idx in block_indices:
+                    coeff = randint(1, self.p - 1)
+                    file_challenges[file_id].append((block_idx, coeff))
+                    challenge_items.append({"file_id": file_id, "index": block_idx, "coeff": coeff})
+                    
+            # Step 3: Send challenge to server (same as regular por-proof)
+            response = requests.post(f"{self.server_url}/por-proof", json={
+                "file_ids": file_ids,
+                "challenge": challenge_items
+            })
+            
+            if response.status_code != 200:
+                return {"success": False, "message": f"Server error: {response.text}"}
+                
+            # Step 4: Process server response
+            data = response.json()
+            sigma = int(data["sigma"], 16)
+            mu_dict = {file_id: int(mu_hex, 16) for file_id, mu_hex in data["mu"].items()}
+            
+            # Step 5: Verify the proof
+            verified = self.verify_por_proof(file_challenges, sigma, mu_dict)
+            
+            # Step 6: Format results
+            per_file_results = {}
+            for file_id in file_ids:
+                if file_id not in self.file_params:
+                    per_file_results[file_id] = {"verified": False, "error": "No local parameters found"}
+                    continue
+                    
+                blocks_audited = [idx for idx, _ in file_challenges[file_id]]
+                per_file_results[file_id] = {"verified": verified, "blocks_audited": blocks_audited}
+            
+            audit_result = {
+                "success": True,
+                "verified": verified,
+                "keyword": keyword,
+                "file_count": len(file_ids),
+                "block_count": sum(len(blocks_audited) for file_id, file_result in per_file_results.items() 
+                                if "blocks_audited" in file_result 
+                                for blocks_audited in [file_result["blocks_audited"]]),
+                "file_results": per_file_results,
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            logger.info(f"Keyword audit completed with result: verified={verified}")
+            return audit_result
+            
+        except Exception as e:
+            logger.error(f"Error during keyword audit: {str(e)}")
+            return {"success": False, "message": str(e)}
 
     def run_audit(self, audit_spec: str) -> Dict[str, Any]:
         """
@@ -877,8 +952,11 @@ def main():
     upload_parser.add_argument("--keywords", type=str, nargs='+', help="Optional manual keywords for the file")
 
     # Audit subcommand
-    audit_parser = subparsers.add_parser("audit", help="Audit specific files and blocks")
-    audit_parser.add_argument("spec", type=str, help="Audit specification in format 'file_id1 file_id2 ... 1,2,4'")
+    audit_parser = subparsers.add_parser("audit", help="Audit files by ID or keyword")
+    audit_group = audit_parser.add_mutually_exclusive_group(required=True)
+    audit_group.add_argument("--files", type=str, help="Audit by file IDs: 'file_id1 file_id2 ... 1,2,4'")
+    audit_group.add_argument("--keyword", type=str, help="Audit files containing this keyword")
+    audit_parser.add_argument("--blocks", type=str, help="Block indices for keyword audit (e.g., '0,1,3')")
 
     # PoR subcommand
     por_parser = subparsers.add_parser("por", help="Request PoR proof for multiple files")
@@ -945,9 +1023,19 @@ def main():
             print(f"Error: {args.file} is not a valid file or directory")
             
     elif args.command == "audit":
-        # Run an audit using the specified files and blocks
         try:
-            result = client.run_audit(args.spec)
+            if args.keyword:
+                # Parse block indices
+                if not args.blocks:
+                    print("Error: Block indices (--blocks) required for keyword audit")
+                    sys.exit(1)
+                    
+                block_indices = [int(idx) for idx in args.blocks.split(',')]
+                result = client.audit_by_keyword(args.keyword, block_indices)
+            else:
+                result = client.run_audit(args.files)
+                
+            # Process and display result
             if result.get("success", False):
                 if result.get("verified", False):
                     print(f"✅ Audit SUCCESSFUL for {result['file_count']} files ({result['block_count']} blocks)")
